@@ -1,35 +1,32 @@
 # Flyntic Studio
 
-Flyntic Studio is a modular web application designed for managing, assembling, and calculating drone configurations. It provides a user-friendly interface for drone enthusiasts and professionals to design, simulate, and optimize drone assemblies.
+Flyntic Studio is a Godot-based drone assembly and simulation demo. It provides an interactive workspace to place components, wire systems, run preflight checks, and execute block-based flight sequences.
 
 ## Features
 - **Drone Assembly Management:** Create, edit, and manage drone assemblies with customizable components.
-- **Calculation Services:** Perform calculations related to drone performance, weight, and other parameters.
-- **Web Interface:** Intuitive web UI for interacting with drone data and visualizing configurations.
-- **Extensible Architecture:** Built with a service-oriented approach for easy extension and integration.
+- **Simulation & Diagnostics:** Run simulation steps, monitor capability checks, and validate wiring constraints.
+- **Block Programming UI:** Build and execute command chains for drone behavior.
+- **Project Save/Load:** Persist projects via `.flyntic` files.
 
 ## Project Structure
-- `FlynticStudio.Services/`: Backend services for drone assembly and calculation logic.
-- `FlynticStudio.Web/`: ASP.NET Core web application with controllers, views, and static assets.
+- `Godot/`: Main Godot project, scripts, scenes, and assets.
+- `TODO_GODOT.md`: Functional TODO list focused on Godot scope.
+- `PRODUCTIZATION_EXECUTION_PLAN.md`: 90-day plan to reach paid-product readiness.
+- `IMPLEMENTATION_BACKLOG.md`: Prioritized sprint-ready backlog.
 
 ## Getting Started
 1. **Clone the repository:**
    ```bash
    git clone https://github.com/Eau-Claire/Flyntic-Studio-Demo.git
    ```
-2. **Build the solution:**
-   ```bash
-   dotnet build FlynticStudio.sln
-   ```
-3. **Run the web application:**
-   ```bash
-   dotnet run --project FlynticStudio.Web/FlynticStudio.Web.csproj
-   ```
-4. **Access the app:**
-   Open your browser and navigate to `http://localhost:5000` (or the port specified in your configuration).
+2. **Open the Godot project:**
+   - Open Godot Engine.
+   - Import `Godot/project.godot`.
+3. **Run the project:**
+   - Use the editor Run button.
 
 ## Requirements
-- .NET 9.0 SDK or later
+- Godot 4.x
 
 ## License
 MIT License

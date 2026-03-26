@@ -392,6 +392,16 @@ const WIRING_RULES := {
 
 const COMPONENT_TYPE_FRAME := "Frame"
 const COMPONENT_TYPE_FC := "FC"
+const PROJECT_SCHEMA_VERSION := 2
+const AUTOSAVE_INTERVAL_SEC := 20.0
+const AUTOSAVE_DIR := "user://autosave"
+const AUTOSAVE_LATEST_PATH := "user://autosave/latest.flyntic"
+const AUTOSAVE_MAX_SNAPSHOTS := 5
+
+var _autosave_enabled := true
+var _autosave_timer := 0.0
+var _autosave_last_hash := 0
+var _autosave_bootstrapped := false
 
 # ──────────────────────────── INIT ────────────────────────────────
 func _ready():
@@ -438,6 +448,7 @@ func _ready():
 	_init_bridge()
 	_setup_onboarding_ui()
 	_load_ui_prefs()
+	_init_autosave()
 	
 	# Pro Graphics Settings
 	var env = camera.environment
@@ -1688,6 +1699,7 @@ func _process(_delta):
 	
 	if sim_state == "playing":
 		_simulate(_delta)
+	_tick_autosave(_delta)
 
 # ──────────────────────────── GHOST / PLACEMENT ───────────────────
 func _on_item_selected(idx: int):
@@ -3478,6 +3490,13 @@ func _is_valid_graph_connection(from_node: GraphNode, from_port: int, to_node: G
 		return false
 	return true
 
+func _is_wiring_type_allowed(from_type: String, to_type: String) -> bool:
+	if from_type == "" or to_type == "":
+		return false
+	if not WIRING_RULES.has(from_type):
+		return false
+	return to_type in WIRING_RULES[from_type]
+
 func _add_graph_port(node: GraphNode, idx: int, text: String, left_en: bool, left_type: int, right_en: bool, right_type: int, left_col: Color, right_col: Color):
 	var lbl = Label.new()
 	lbl.text = "  " + text + "  "
@@ -3530,6 +3549,12 @@ func _on_graph_connection_request(from_node: StringName, from_port: int, to_node
 	if wiring_graph.is_node_connected(src_node, src_port, dst_node, dst_port):
 		return
 
+	var src_comp_type = _get_comp_type_by_uid(str(src_node))
+	var dst_comp_type = _get_comp_type_by_uid(str(dst_node))
+	if not _is_wiring_type_allowed(src_comp_type, dst_comp_type):
+		_log("Invalid wiring rule: %s cannot connect to %s" % [src_comp_type, dst_comp_type], "error")
+		return
+
 	var from_type = _get_graph_output_type(src_gnode, src_port)
 	var to_type = _get_graph_input_type(dst_gnode, dst_port)
 	
@@ -3567,6 +3592,187 @@ func _clear_wiring_connections():
 	_log("All wiring connections cleared", "warning")
 
 # ──────────────────────────── SAVE / LOAD ─────────────────────────
+func _init_autosave():
+	var mk_err = DirAccess.make_dir_recursive_absolute(AUTOSAVE_DIR)
+	if mk_err != OK and mk_err != ERR_ALREADY_EXISTS:
+		_log("Failed to initialize autosave directory", "warning")
+	if FileAccess.file_exists(AUTOSAVE_LATEST_PATH):
+		_log("Autosave snapshot available", "info")
+
+func _tick_autosave(delta: float):
+	if not _autosave_enabled:
+		return
+	_autosave_timer += delta
+	if _autosave_timer < AUTOSAVE_INTERVAL_SEC:
+		return
+	_autosave_timer = 0.0
+
+	var data = _build_project_data()
+	var sig = hash(JSON.stringify(data))
+	if not _autosave_bootstrapped:
+		_autosave_bootstrapped = true
+		_autosave_last_hash = sig
+		return
+	if sig == _autosave_last_hash:
+		return
+	if _write_project_file(AUTOSAVE_LATEST_PATH, data, false):
+		_autosave_last_hash = sig
+		_write_snapshot_copy(data)
+
+func _write_snapshot_copy(data: Dictionary):
+	var dt = Time.get_datetime_string_from_system().replace(":", "-").replace(" ", "_")
+	var snapshot_path = AUTOSAVE_DIR + "/snapshot_" + dt + ".flyntic"
+	_write_project_file(snapshot_path, data, false)
+
+	var dir = DirAccess.open(AUTOSAVE_DIR)
+	if dir == null:
+		return
+	var snapshots: Array[String] = []
+	dir.list_dir_begin()
+	var name = dir.get_next()
+	while name != "":
+		if not dir.current_is_dir() and name.begins_with("snapshot_") and name.ends_with(".flyntic"):
+			snapshots.append(name)
+		name = dir.get_next()
+	dir.list_dir_end()
+	snapshots.sort()
+	if snapshots.size() > AUTOSAVE_MAX_SNAPSHOTS:
+		for i in range(snapshots.size() - AUTOSAVE_MAX_SNAPSHOTS):
+			DirAccess.remove_absolute(AUTOSAVE_DIR + "/" + snapshots[i])
+
+func _build_project_data() -> Dictionary:
+	var data = {
+		"schema_version": PROJECT_SCHEMA_VERSION,
+		"saved_at_unix": Time.get_unix_time_from_system(),
+		"placed": [],
+		"wiring": [],
+		"blocks": [],
+	}
+	for c in placed:
+		data.placed.append({
+			"id": c.id,
+			"uid": c.uid,
+			"port_name": c.get("port_name", ""),
+			"parent_id": c.get("parent_id", -1),
+		})
+	for w in wiring_connections:
+		data.wiring.append({
+			"from_node": str(w.get("from_node", "")),
+			"from_port": int(w.get("from_port", 0)),
+			"to_node": str(w.get("to_node", "")),
+			"to_port": int(w.get("to_port", 0)),
+		})
+	for child in workspace.get_children():
+		if is_instance_valid(child) and "block_type" in child:
+			data.blocks.append(_serialize_block(child))
+	return data
+
+func _write_project_file(path: String, data: Dictionary, log_success := true) -> bool:
+	var file = FileAccess.open(path, FileAccess.WRITE)
+	if file == null:
+		_log("Failed to write project: " + path, "error")
+		return false
+	file.store_string(JSON.stringify(data, "\t"))
+	file.close()
+	if log_success:
+		_log("Project saved: " + path, "success")
+	return true
+
+func _normalize_loaded_project(raw_data: Variant) -> Dictionary:
+	if typeof(raw_data) != TYPE_DICTIONARY:
+		return {}
+	var src: Dictionary = raw_data
+	var version = int(src.get("schema_version", 1))
+	if version > PROJECT_SCHEMA_VERSION:
+		_log("Project file is from a newer version. Attempting compatibility load.", "warning")
+
+	var normalized = {
+		"schema_version": PROJECT_SCHEMA_VERSION,
+		"placed": [],
+		"wiring": [],
+		"blocks": [],
+	}
+
+	for c in src.get("placed", []):
+		if typeof(c) != TYPE_DICTIONARY:
+			continue
+		var cid = str(c.get("id", ""))
+		if not COMPONENTS.has(cid):
+			continue
+		normalized.placed.append({
+			"id": cid,
+			"uid": int(c.get("uid", -1)),
+			"port_name": str(c.get("port_name", "")),
+			"parent_id": int(c.get("parent_id", -1)),
+		})
+
+	for w in src.get("wiring", []):
+		if typeof(w) != TYPE_DICTIONARY:
+			continue
+		normalized.wiring.append({
+			"from_node": str(w.get("from_node", "")),
+			"from_port": int(w.get("from_port", 0)),
+			"to_node": str(w.get("to_node", "")),
+			"to_port": int(w.get("to_port", 0)),
+		})
+
+	for b in src.get("blocks", []):
+		if typeof(b) == TYPE_DICTIONARY:
+			normalized.blocks.append(b)
+
+	if version < PROJECT_SCHEMA_VERSION:
+		_log("Upgraded project schema from v%d to v%d" % [version, PROJECT_SCHEMA_VERSION], "info")
+
+	return normalized
+
+func _apply_loaded_project_data(data: Dictionary):
+	# Clear current state fully before load
+	_cancel_ghost()
+	for c in placed:
+		if is_instance_valid(c.get("node")):
+			c.node.queue_free()
+	placed.clear()
+	_clear_children(wires_group)
+	_selected_uid = -1
+
+	# Resolve frame from saved project (fallback to default)
+	var saved_frame_id = "PVC Pipe Frame"
+	for c_data in data.get("placed", []):
+		if COMPONENTS.has(c_data.id) and COMPONENTS[c_data.id].type == COMPONENT_TYPE_FRAME:
+			saved_frame_id = c_data.id
+			break
+	_place(saved_frame_id, Vector3.ZERO, "", -1, -1, true, false)
+
+	# Reload placed components
+	for c_data in data.get("placed", []):
+		if COMPONENTS.has(c_data.id) and COMPONENTS[c_data.id].type != COMPONENT_TYPE_FRAME:
+			var pos = Vector3.ZERO
+			if c_data.parent_id != -1:
+				for p in placed:
+					if p.uid == c_data.parent_id and is_instance_valid(p.node):
+						var ports = COMPONENTS[p.id].get("ports", [])
+						for port in ports:
+							if port.name == c_data.port_name:
+								pos = p.node.global_transform * port.pos
+								break
+			_place(c_data.id, pos, c_data.get("port_name", ""), c_data.get("parent_id", -1), -1, true, false)
+
+	# Reload blocks
+	_clear_children(workspace)
+	for b_data in data.get("blocks", []):
+		_deserialize_block(b_data, null)
+
+	# Reload wiring
+	wiring_connections.clear()
+	for w in data.get("wiring", []):
+		wiring_connections.append(w)
+
+	_undo_stack.clear()
+	_redo_stack.clear()
+	_update_all()
+	_autosave_last_hash = hash(JSON.stringify(_build_project_data()))
+	_autosave_bootstrapped = true
+
 func _save_project():
 	var fd = FileDialog.new()
 	fd.file_mode = FileDialog.FILE_MODE_SAVE_FILE
@@ -3575,23 +3781,10 @@ func _save_project():
 	fd.title = "Save Project"
 	add_child(fd)
 	fd.file_selected.connect(func(path):
-		var data = {"placed": [], "wiring": wiring_connections}
-		for c in placed:
-			data.placed.append({"id": c.id, "uid": c.uid, "port_name": c.get("port_name", ""), "parent_id": c.get("parent_id", -1)})
-		# Save blocks
-		var blocks = []
-		for child in workspace.get_children():
-			if is_instance_valid(child) and "block_type" in child:
-				blocks.append(_serialize_block(child))
-		data["blocks"] = blocks
-		var file = FileAccess.open(path, FileAccess.WRITE)
-		if file == null:
-			_log("Failed to write project: " + path, "error")
-			fd.queue_free()
-			return
-		file.store_string(JSON.stringify(data, "\t"))
-		file.close()
-		_log("Project saved: " + path, "success")
+		var data = _build_project_data()
+		_write_project_file(path, data, true)
+		_autosave_last_hash = hash(JSON.stringify(data))
+		_autosave_bootstrapped = true
 		fd.queue_free()
 	)
 	fd.canceled.connect(func(): fd.queue_free())
@@ -3630,48 +3823,12 @@ func _load_project():
 			_log("Invalid project file!", "error")
 			fd.queue_free()
 			return
-		var data = json.data
-		
-		# Clear current state fully before load
-		_cancel_ghost()
-		for c in placed:
-			if is_instance_valid(c.get("node")):
-				c.node.queue_free()
-		placed.clear()
-		_clear_children(wires_group)
-		_selected_uid = -1
-		
-		# Resolve frame from saved project (fallback to default)
-		var saved_frame_id = "PVC Pipe Frame"
-		for c_data in data.get("placed", []):
-			if COMPONENTS.has(c_data.id) and COMPONENTS[c_data.id].type == COMPONENT_TYPE_FRAME:
-				saved_frame_id = c_data.id
-				break
-		_place(saved_frame_id, Vector3.ZERO, "", -1, -1, true, false)
-		# Reload placed components
-		for c_data in data.get("placed", []):
-			if COMPONENTS.has(c_data.id) and COMPONENTS[c_data.id].type != COMPONENT_TYPE_FRAME:
-				var pos = Vector3.ZERO
-				if c_data.parent_id != -1:
-					for p in placed:
-						if p.uid == c_data.parent_id and is_instance_valid(p.node):
-							var ports = COMPONENTS[p.id].get("ports", [])
-							for port in ports:
-								if port.name == c_data.port_name:
-									pos = p.node.global_transform * port.pos
-									break
-				_place(c_data.id, pos, c_data.get("port_name", ""), c_data.get("parent_id", -1), -1, true, false)
-		# Reload blocks
-		_clear_children(workspace)
-		for b_data in data.get("blocks", []):
-			_deserialize_block(b_data, null)
-		# Reload wiring
-		wiring_connections.clear()
-		for w in data.get("wiring", []):
-			wiring_connections.append(w)
-		_undo_stack.clear()
-		_redo_stack.clear()
-		_update_all()
+		var normalized = _normalize_loaded_project(json.data)
+		if normalized.is_empty():
+			_log("Invalid project schema!", "error")
+			fd.queue_free()
+			return
+		_apply_loaded_project_data(normalized)
 		_log("Project loaded: " + path, "success")
 		fd.queue_free()
 	)
