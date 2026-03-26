@@ -37,6 +37,9 @@ This backlog is ordered by business impact and release risk.
 - [x] Add geofence + failsafe safety layer (RTL and emergency land) for autonomous runs.
 - [x] Add telemetry session manifest (seed/profile metadata) for deterministic replay context.
 - [x] Add telemetry quality validator (row/monotonic/outlier checks).
+- [x] Upgrade mission planner to mission-graph flow with geofence return-home branch.
+- [x] Add controller mode cycle (manual assist / auto mission / adaptive hover).
+- [x] Add swarm behavior presets (leader-follower / area sweep / relay chain).
 
 ## Suggested Sprint Mapping
 
@@ -74,3 +77,11 @@ This backlog is ordered by business impact and release risk.
 - [x] Sensor model plugin integration
 - [x] Safety layer (geofence/failsafe) integration
 - [x] Telemetry manifest + quality validator integration
+- [x] Mission graph return-home branch integration
+- [x] Controller mode + swarm behavior preset integration
+
+## Architecture Stabilization Delta
+
+- [x] Extract runtime mode orchestration into `Godot/RuntimeModeService.gd`.
+- [x] Extract kinematic wind/control assist logic into `Godot/FlightAssistService.gd`.
+- [ ] Continue splitting `Main.gd` into scene assembly, simulation loop, and UI interaction controllers.

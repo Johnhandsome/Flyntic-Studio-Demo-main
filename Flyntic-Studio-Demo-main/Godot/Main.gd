@@ -403,6 +403,12 @@ const TELEMETRY_DIR := "user://telemetry"
 const DIAG_SEV_ERROR := "error"
 const DIAG_SEV_WARNING := "warning"
 const DIAG_SEV_INFO := "info"
+const CTRL_MODE_MANUAL_ASSIST := "manual_assist"
+const CTRL_MODE_AUTO_MISSION := "auto_mission"
+const CTRL_MODE_ADAPTIVE_HOVER := "adaptive_hover"
+const SWARM_BEHAVIOR_LEADER_FOLLOWER := "leader_follower"
+const SWARM_BEHAVIOR_AREA_SWEEP := "area_sweep"
+const SWARM_BEHAVIOR_RELAY_CHAIN := "relay_chain"
 
 var _autosave_enabled := true
 var _autosave_timer := 0.0
@@ -415,14 +421,21 @@ var _environment_service: RefCounted = null
 var _swarm_controller: RefCounted = null
 var _telemetry_recorder: RefCounted = null
 var _telemetry_validator: RefCounted = null
+var _runtime_mode_service: RefCounted = null
+var _runtime_input_service: RefCounted = null
+var _flight_assist_service: RefCounted = null
+var _mission_runtime_service: RefCounted = null
+var _swarm_telemetry_service: RefCounted = null
 var _mission_planner: RefCounted = null
 var _sensor_model: RefCounted = null
 var _replay_runner: RefCounted = null
 var _safety_layer: RefCounted = null
 var _swarm_enabled := false
 var _swarm_count := 0
+var _swarm_behavior := SWARM_BEHAVIOR_LEADER_FOLLOWER
 var _low_hardware_mode := true
 var _safety_enabled := true
+var _flight_control_mode := CTRL_MODE_MANUAL_ASSIST
 var _telemetry_sample_timer := 0.0
 var _telemetry_sample_rate := 12.0
 var _mission_active := false
@@ -594,7 +607,7 @@ func _init_analytics():
 	if not _analytics_enabled:
 		return
 	if _analytics_service == null:
-		var analytics_script = load("res://AnalyticsService.gd")
+		var analytics_script = load("res://services/AnalyticsService.gd")
 		if analytics_script == null:
 			_log("Analytics service script missing", "warning")
 			return
@@ -613,7 +626,37 @@ func _track_event(name: String, payload: Dictionary = {}):
 	_analytics_service.track_event(name, payload)
 
 func _init_environment_modules():
-	var env_script = load("res://EnvironmentPhysicsService.gd")
+	var runtime_mode_script = load("res://services/RuntimeModeService.gd")
+	if runtime_mode_script != null:
+		_runtime_mode_service = runtime_mode_script.new()
+	else:
+		_log("Runtime mode service missing", "warning")
+
+	var runtime_input_script = load("res://services/RuntimeInputService.gd")
+	if runtime_input_script != null:
+		_runtime_input_service = runtime_input_script.new()
+	else:
+		_log("Runtime input service missing", "warning")
+
+	var flight_assist_script = load("res://services/FlightAssistService.gd")
+	if flight_assist_script != null:
+		_flight_assist_service = flight_assist_script.new()
+	else:
+		_log("Flight assist service missing", "warning")
+
+	var mission_runtime_script = load("res://services/MissionRuntimeService.gd")
+	if mission_runtime_script != null:
+		_mission_runtime_service = mission_runtime_script.new()
+	else:
+		_log("Mission runtime service missing", "warning")
+
+	var swarm_telemetry_script = load("res://services/SwarmTelemetryService.gd")
+	if swarm_telemetry_script != null:
+		_swarm_telemetry_service = swarm_telemetry_script.new()
+	else:
+		_log("Swarm telemetry service missing", "warning")
+
+	var env_script = load("res://services/EnvironmentPhysicsService.gd")
 	if env_script != null:
 		_environment_service = env_script.new()
 		_environment_service.configure({"low_hardware_mode": _low_hardware_mode})
@@ -639,7 +682,7 @@ func _init_environment_modules():
 	else:
 		_log("Mission planner module missing", "warning")
 
-	var sensor_script = load("res://SensorModelService.gd")
+	var sensor_script = load("res://services/SensorModelService.gd")
 	if sensor_script != null:
 		_sensor_model = sensor_script.new()
 		_sensor_model.configure({"seed": 1337})
@@ -652,7 +695,7 @@ func _init_environment_modules():
 	else:
 		_log("Replay runner module missing", "warning")
 
-	var safety_script = load("res://SafetyLayer.gd")
+	var safety_script = load("res://services/SafetyLayer.gd")
 	if safety_script != null:
 		_safety_layer = safety_script.new()
 		_safety_layer.configure({
@@ -665,13 +708,13 @@ func _init_environment_modules():
 		_log("Safety layer module missing", "warning")
 
 func _init_telemetry():
-	var telemetry_script = load("res://TelemetryRecorder.gd")
+	var telemetry_script = load("res://services/TelemetryRecorder.gd")
 	if telemetry_script == null:
 		_log("Telemetry recorder module missing", "warning")
 		return
 	_telemetry_recorder = telemetry_script.new()
 	_telemetry_recorder.initialize(TELEMETRY_DIR)
-	var validator_script = load("res://TelemetryDataValidator.gd")
+	var validator_script = load("res://services/TelemetryDataValidator.gd")
 	if validator_script != null:
 		_telemetry_validator = validator_script.new()
 	else:
@@ -692,7 +735,29 @@ func _toggle_swarm():
 	_swarm_controller.spawn_followers(_swarm_count, components_group.global_position)
 	_swarm_enabled = true
 	_log("Swarm enabled: %d followers" % _swarm_count, "success")
-	_track_event("swarm_enabled", {"count": _swarm_count})
+	_track_event("swarm_enabled", {"count": _swarm_count, "behavior": _swarm_behavior})
+
+func _cycle_swarm_behavior():
+	if _runtime_mode_service != null:
+		_swarm_behavior = _runtime_mode_service.cycle_swarm_behavior(_swarm_behavior)
+	else:
+		var modes = [SWARM_BEHAVIOR_LEADER_FOLLOWER, SWARM_BEHAVIOR_AREA_SWEEP, SWARM_BEHAVIOR_RELAY_CHAIN]
+		var idx = modes.find(_swarm_behavior)
+		idx = (idx + 1) % modes.size()
+		_swarm_behavior = modes[idx]
+	_log("Swarm behavior: " + _swarm_behavior, "info")
+	_track_event("swarm_behavior_changed", {"behavior": _swarm_behavior})
+
+func _cycle_flight_control_mode():
+	if _runtime_mode_service != null:
+		_flight_control_mode = _runtime_mode_service.cycle_control_mode(_flight_control_mode)
+	else:
+		var modes = [CTRL_MODE_MANUAL_ASSIST, CTRL_MODE_AUTO_MISSION, CTRL_MODE_ADAPTIVE_HOVER]
+		var idx = modes.find(_flight_control_mode)
+		idx = (idx + 1) % modes.size()
+		_flight_control_mode = modes[idx]
+	_log("Flight control mode: " + _flight_control_mode, "info")
+	_track_event("flight_control_mode_changed", {"mode": _flight_control_mode})
 
 func _toggle_telemetry_recording():
 	if _telemetry_recorder == null:
@@ -796,7 +861,10 @@ func _build_telemetry_session_metadata() -> Dictionary:
 		"seed": 1337,
 		"low_hardware_mode": _low_hardware_mode,
 		"swarm_enabled": _swarm_enabled,
+		"swarm_behavior": _swarm_behavior,
 		"mission_active": _mission_active,
+		"mission_graph": true,
+		"control_mode": _flight_control_mode,
 		"safety_enabled": _safety_enabled,
 		"sample_rate_hz": _telemetry_sample_rate,
 		"profile": "low_hardware" if _low_hardware_mode else "balanced",
@@ -893,12 +961,43 @@ func _sample_environment(delta: float):
 		_environment_service.apply_environment_lighting(camera.environment, sim_time)
 
 func _update_swarm_and_telemetry(delta: float):
+	if _swarm_telemetry_service != null:
+		var result = _swarm_telemetry_service.update_runtime({
+			"delta": delta,
+			"sim_time": sim_time,
+			"leader_pos": components_group.global_position,
+			"prev_pos": _prev_leader_pos,
+			"prev_vel": _prev_leader_vel,
+			"env_state": _env_state,
+			"sensor_model": _sensor_model,
+			"sensor_state": _sensor_state,
+			"swarm_enabled": _swarm_enabled,
+			"swarm_controller": _swarm_controller,
+			"swarm_behavior": _swarm_behavior,
+			"telemetry_recorder": _telemetry_recorder,
+			"telemetry_sample_timer": _telemetry_sample_timer,
+			"telemetry_sample_rate": _telemetry_sample_rate,
+			"safety_state": _safety_state,
+		})
+		_sensor_state = result.get("sensor_state", _sensor_state)
+		_telemetry_sample_timer = float(result.get("telemetry_sample_timer", _telemetry_sample_timer))
+		_prev_leader_pos = result.get("prev_leader_pos", _prev_leader_pos)
+		_prev_leader_vel = result.get("prev_leader_vel", _prev_leader_vel)
+		return
+
 	var leader_vel = (components_group.global_position - _prev_leader_pos) / max(delta, 0.0001)
 	var accel = (leader_vel - _prev_leader_vel) / max(delta, 0.0001)
 	if _sensor_model != null:
 		_sensor_state = _sensor_model.sample(sim_time, components_group.global_position, leader_vel, accel, _env_state.get("emi", Vector3.ZERO))
 	if _swarm_enabled and _swarm_controller != null:
-		_swarm_controller.update_followers(delta, components_group.global_position, leader_vel, _env_state.get("wind", Vector3.ZERO))
+		_swarm_controller.update_followers(
+			delta,
+			components_group.global_position,
+			leader_vel,
+			_env_state.get("wind", Vector3.ZERO),
+			_swarm_behavior,
+			sim_time
+		)
 
 	_telemetry_sample_timer += delta
 	if _telemetry_recorder != null and _telemetry_recorder.is_active() and _telemetry_sample_timer >= (1.0 / max(_telemetry_sample_rate, 1.0)):
@@ -2070,54 +2169,65 @@ func _input(event):
 			pivot.global_position += cam_basis.y * event.relative.y * pan_speed
 
 	if event is InputEventKey and event.pressed:
-		if not sim_locked:
-			if event.keycode == KEY_R and ghost:
+		_handle_runtime_shortcuts(event, sim_locked)
+
+func _handle_runtime_shortcuts(event: InputEventKey, sim_locked: bool):
+	var actions: Array[String] = []
+	if _runtime_input_service != null:
+		actions = _runtime_input_service.resolve_key_actions(event, sim_locked, ghost != null)
+	else:
+		return
+
+	for action in actions:
+		match action:
+			"rotate_ghost":
 				ghost_rot += PI / 2
-			if event.keycode == KEY_ESCAPE:
+			"cancel_ghost":
 				_cancel_ghost()
-			if event.keycode == KEY_DELETE or event.keycode == KEY_BACKSPACE:
+			"remove_selected":
 				_remove_selected()
-		# Undo/Redo
-		if event.ctrl_pressed and event.keycode == KEY_Z:
-			_undo()
-		if event.ctrl_pressed and event.keycode == KEY_Y:
-			_redo()
-		# Save/Load
-		if event.ctrl_pressed and event.keycode == KEY_S:
-			_track_event("save_shortcut_used")
-			_save_project()
-		if event.ctrl_pressed and event.keycode == KEY_O:
-			_track_event("load_shortcut_used")
-			_load_project()
-		# Camera shortcuts
-		if event.keycode == KEY_HOME:
-			_reset_camera()
-		if event.keycode == KEY_F6:
-			_toggle_telemetry_recording()
-		if event.keycode == KEY_F4:
-			_validate_latest_telemetry()
-		if event.keycode == KEY_F7 and not sim_locked:
-			_toggle_swarm()
-		if event.keycode == KEY_F8:
-			_low_hardware_mode = not _low_hardware_mode
-			if _environment_service != null:
-				_environment_service.configure({"low_hardware_mode": _low_hardware_mode})
-			_log("Low hardware mode: " + ("ON" if _low_hardware_mode else "OFF"), "info")
-		if event.keycode == KEY_F5:
-			_toggle_safety_layer()
-		if event.keycode == KEY_F10 and not sim_locked:
-			_toggle_autonomous_mission()
-		if event.keycode == KEY_F12 and not sim_locked:
-			_toggle_replay_mode()
-		if event.keycode == KEY_F9 and not sim_locked:
-			_run_guided_remediation()
-		if event.keycode == KEY_F and not sim_locked:
-			_focus_selected()
-		if event.keycode == KEY_F11:
-			if DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN:
-				DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
-			else:
-				DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN)
+			"undo":
+				_undo()
+			"redo":
+				_redo()
+			"save":
+				_track_event("save_shortcut_used")
+				_save_project()
+			"load":
+				_track_event("load_shortcut_used")
+				_load_project()
+			"reset_camera":
+				_reset_camera()
+			"toggle_telemetry":
+				_toggle_telemetry_recording()
+			"validate_telemetry":
+				_validate_latest_telemetry()
+			"cycle_control_mode":
+				_cycle_flight_control_mode()
+			"cycle_swarm_behavior":
+				_cycle_swarm_behavior()
+			"toggle_swarm":
+				_toggle_swarm()
+			"toggle_low_hardware":
+				_low_hardware_mode = not _low_hardware_mode
+				if _environment_service != null:
+					_environment_service.configure({"low_hardware_mode": _low_hardware_mode})
+				_log("Low hardware mode: " + ("ON" if _low_hardware_mode else "OFF"), "info")
+			"toggle_safety":
+				_toggle_safety_layer()
+			"toggle_mission":
+				_toggle_autonomous_mission()
+			"toggle_replay":
+				_toggle_replay_mode()
+			"run_remediation":
+				_run_guided_remediation()
+			"focus_selected":
+				_focus_selected()
+			"toggle_fullscreen":
+				if DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN:
+					DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+				else:
+					DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN)
 
 func _process(_delta):
 	# Only process 3D camera/movement on Canvas tab
@@ -3083,14 +3193,43 @@ func _simulate_kinematic(delta: float, check: Dictionary):
 	"""Original kinematic simulation as fallback when bridge is not connected."""
 	var current_vel = (components_group.global_position - _prev_leader_pos) / max(delta, 0.0001)
 	if _mission_active and _mission_planner != null:
-		var mission = _mission_planner.compute_target(components_group.global_position, current_vel, delta)
-		if bool(mission.get("active", false)):
-			sim_target_pos = mission.get("predicted", sim_target_pos)
-			sim_label.text = "AUTO WP %d/%d" % [_mission_planner.current_index() + 1, _mission_planner.waypoint_count()]
-		elif bool(mission.get("completed", false)):
-			_mission_active = false
-			_log("Autonomous mission completed", "success")
-			_track_event("mission_completed")
+		if _mission_runtime_service != null:
+			var mission_rt = _mission_runtime_service.update_mission({
+				"mission_active": _mission_active,
+				"mission_planner": _mission_planner,
+				"current_pos": components_group.global_position,
+				"current_vel": current_vel,
+				"delta": delta,
+				"safety_state": _safety_state,
+				"sim_target_pos": sim_target_pos,
+			})
+			_mission_active = bool(mission_rt.get("mission_active", _mission_active))
+			sim_target_pos = mission_rt.get("sim_target_pos", sim_target_pos)
+			var status_text = str(mission_rt.get("status_text", ""))
+			if status_text != "":
+				sim_label.text = status_text
+			if bool(mission_rt.get("completed", false)):
+				var rth_used = bool(mission_rt.get("rth_used", false))
+				_log("Autonomous mission completed" + (" (RTH branch)" if rth_used else ""), "success")
+				_track_event("mission_completed")
+		else:
+			var mission = _mission_planner.compute_target(
+				components_group.global_position,
+				current_vel,
+				delta,
+				{
+					"geofence_breached": str(_safety_state.get("reason", "")) == "geofence_breach",
+				}
+			)
+			if bool(mission.get("active", false)):
+				sim_target_pos = mission.get("predicted", sim_target_pos)
+				var mode = str(mission.get("mode", _mission_planner.mode()))
+				sim_label.text = "AUTO %s %d/%d" % [mode.to_upper(), _mission_planner.current_index() + 1, _mission_planner.waypoint_count()]
+			elif bool(mission.get("completed", false)):
+				_mission_active = false
+				var rth_used = bool(mission.get("rth_used", false))
+				_log("Autonomous mission completed" + (" (RTH branch)" if rth_used else ""), "success")
+				_track_event("mission_completed")
 
 	# 2. Logic Step Processing
 	if sim_state == "playing" and sim_step_idx < sim_sequence.size():
@@ -3157,7 +3296,28 @@ func _simulate_kinematic(delta: float, check: Dictionary):
 	var final_target = sim_target_pos
 	if check.capability == "Cannot fly":
 		final_target.y = 0.0
-	final_target += _env_state.get("wind", Vector3.ZERO) * delta * 0.45
+	var wind = _env_state.get("wind", Vector3.ZERO)
+	if _flight_assist_service != null:
+		final_target = _flight_assist_service.apply_control_mode(
+			_flight_control_mode,
+			final_target,
+			wind,
+			delta,
+			sim_sequence,
+			sim_step_idx,
+			components_group.position,
+			sim_target_pos
+		)
+	else:
+		match _flight_control_mode:
+			CTRL_MODE_ADAPTIVE_HOVER:
+				final_target += wind * delta * 0.18
+				if sim_sequence.size() == 0 or (sim_step_idx < sim_sequence.size() and (sim_sequence[sim_step_idx].type == "hover" or sim_sequence[sim_step_idx].type == "wait")):
+					final_target = final_target.lerp(Vector3(components_group.position.x, sim_target_pos.y, components_group.position.z), 0.35)
+			CTRL_MODE_AUTO_MISSION:
+				final_target += wind * delta * 0.30
+			_:
+				final_target += wind * delta * 0.45
 	
 	components_group.position = components_group.position.lerp(final_target, 0.05)
 	
@@ -3441,17 +3601,20 @@ func _update_diagnostics():
 	))
 	issues.append(_diag_issue(
 		DIAG_SEV_INFO,
-		"Swarm=%s (%d), Telemetry=%s, LowHW=%s" % [
+		"Swarm=%s (%d, %s), Telemetry=%s, LowHW=%s" % [
 			"ON" if _swarm_enabled else "OFF",
 			_swarm_controller.follower_count() if _swarm_controller != null else 0,
+			_swarm_behavior,
 			"ON" if (_telemetry_recorder != null and _telemetry_recorder.is_active()) else "OFF",
 			"ON" if _low_hardware_mode else "OFF",
 		]
 	))
 	issues.append(_diag_issue(
 		DIAG_SEV_INFO,
-		"Mission=%s, Replay=%s, SensorHealth=%.2f, Safety=%s" % [
+		"Mission=%s (%s), Control=%s, Replay=%s, SensorHealth=%.2f, Safety=%s" % [
 			"ON" if _mission_active else "OFF",
+			_mission_planner.mode() if _mission_planner != null else "n/a",
+			_flight_control_mode,
 			"ON" if _replay_active else "OFF",
 			float(_sensor_state.get("health", 1.0)),
 			"ON" if _safety_enabled else "OFF",

@@ -9,16 +9,21 @@ Flyntic Studio is a Godot-based drone assembly and simulation demo. It provides 
 - **Project Save/Load:** Persist projects via `.flyntic` files.
 - **Environment Physics:** Wind/EMI/light effects with low-hardware-friendly defaults.
 - **Swarm Baseline:** Lightweight multi-drone follower formation mode.
+- **Swarm Behaviors:** Leader-follower, area sweep, and relay-chain presets.
+- **Flight Control Modes:** Manual assist, auto mission, and adaptive hover.
 - **Telemetry Capture:** Session data export to JSONL/CSV for analysis and model development.
 - **Dataset Reproducibility:** Per-session telemetry manifest (seed/profile metadata) and in-app quality validation.
 
 ## Project Structure
 - `Godot/`: Main Godot project, scripts, scenes, and assets.
+- `Godot/services/`: Extracted runtime services (input, telemetry, mission, assist, analytics, safety).
 - `TODO_GODOT.md`: Functional TODO list focused on Godot scope.
 - `IMPLEMENTATION_BACKLOG.md`: Prioritized sprint-ready backlog.
 - `ROADMAP_AUTONOMOUS_DRONE.md`: Unified roadmap for realistic physics, swarm, and autonomous data platform.
 
 ## Runtime Controls
+- `F2`: Cycle swarm behavior preset.
+- `F3`: Cycle flight control mode.
 - `F4`: Validate latest telemetry CSV quality (row integrity, monotonic timestamps, outlier scan).
 - `F5`: Toggle safety layer (geofence + failsafe RTL/land).
 - `F6`: Toggle telemetry recording session.
