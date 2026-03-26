@@ -399,6 +399,7 @@ const AUTOSAVE_LATEST_PATH := "user://autosave/latest.flyntic"
 const AUTOSAVE_MAX_SNAPSHOTS := 5
 const ANALYTICS_DIR := "user://analytics"
 const ANALYTICS_EVENTS_PATH := "user://analytics/events.jsonl"
+const TELEMETRY_DIR := "user://telemetry"
 const DIAG_SEV_ERROR := "error"
 const DIAG_SEV_WARNING := "warning"
 const DIAG_SEV_INFO := "info"
@@ -410,6 +411,22 @@ var _autosave_bootstrapped := false
 var _autosave_restore_prompted := false
 var _analytics_enabled := true
 var _analytics_service: RefCounted = null
+var _environment_service: RefCounted = null
+var _swarm_controller: RefCounted = null
+var _telemetry_recorder: RefCounted = null
+var _swarm_enabled := false
+var _swarm_count := 0
+var _low_hardware_mode := true
+var _telemetry_sample_timer := 0.0
+var _telemetry_sample_rate := 12.0
+var _prev_leader_pos := Vector3.ZERO
+var _prev_leader_vel := Vector3.ZERO
+var _env_state := {
+	"wind": Vector3.ZERO,
+	"drag": Vector3.ZERO,
+	"emi": Vector3.ZERO,
+	"luminance": 1.0,
+}
 func _maybe_prompt_restore_autosave():
 	if _autosave_restore_prompted:
 		return
@@ -533,6 +550,8 @@ func _ready():
 	_load_ui_prefs()
 	_init_autosave()
 	_init_analytics()
+	_init_environment_modules()
+	_init_telemetry()
 	_track_event("app_started", {"schema": PROJECT_SCHEMA_VERSION})
 	
 	# Pro Graphics Settings
@@ -568,6 +587,67 @@ func _track_event(name: String, payload: Dictionary = {}):
 	if _analytics_service == null:
 		return
 	_analytics_service.track_event(name, payload)
+
+func _init_environment_modules():
+	var env_script = load("res://EnvironmentPhysicsService.gd")
+	if env_script != null:
+		_environment_service = env_script.new()
+		_environment_service.configure({"low_hardware_mode": _low_hardware_mode})
+	else:
+		_log("Environment physics module missing", "warning")
+
+	var swarm_script = load("res://SwarmController.gd")
+	if swarm_script != null:
+		_swarm_controller = swarm_script.new()
+		var swarm_root = components_group.get_node_or_null("SwarmFollowers") as Node3D
+		if not is_instance_valid(swarm_root):
+			swarm_root = Node3D.new()
+			swarm_root.name = "SwarmFollowers"
+			components_group.add_child(swarm_root)
+		_swarm_controller.initialize(swarm_root)
+	else:
+		_log("Swarm module missing", "warning")
+
+func _init_telemetry():
+	var telemetry_script = load("res://TelemetryRecorder.gd")
+	if telemetry_script == null:
+		_log("Telemetry recorder module missing", "warning")
+		return
+	_telemetry_recorder = telemetry_script.new()
+	_telemetry_recorder.initialize(TELEMETRY_DIR)
+
+func _toggle_swarm():
+	if _swarm_controller == null:
+		_log("Swarm controller unavailable", "warning")
+		return
+	if _swarm_enabled:
+		_swarm_controller.clear_followers()
+		_swarm_enabled = false
+		_swarm_count = 0
+		_log("Swarm disabled", "info")
+		_track_event("swarm_disabled")
+		return
+	_swarm_count = clampi(max(3, placed.size() / 2), 3, 12)
+	_swarm_controller.spawn_followers(_swarm_count, components_group.global_position)
+	_swarm_enabled = true
+	_log("Swarm enabled: %d followers" % _swarm_count, "success")
+	_track_event("swarm_enabled", {"count": _swarm_count})
+
+func _toggle_telemetry_recording():
+	if _telemetry_recorder == null:
+		_log("Telemetry recorder unavailable", "warning")
+		return
+	if _telemetry_recorder.is_active():
+		_telemetry_recorder.stop_session()
+		_log("Telemetry recording stopped", "info")
+		_track_event("telemetry_stopped")
+		return
+	var start_result = _telemetry_recorder.start_session("drone")
+	if bool(start_result.get("ok", false)):
+		_log("Telemetry recording started", "success")
+		_track_event("telemetry_started", {"session": str(start_result.get("session_id", ""))})
+	else:
+		_log("Telemetry recording failed to start", "error")
 
 func _setup_topbar_menu_actions():
 	if not is_instance_valid(topbar_menus):
@@ -636,6 +716,38 @@ func _show_analytics_dashboard():
 		_log("- %s: %d" % [str(k), int(counts[k])], "info")
 	_log("Simulation completion proxy: %.1f%% (%d/%d)" % [started_to_stopped, sim_stopped, sim_started], "info")
 	_log("Projects saved/loaded: %d/%d" % [projects_saved, projects_loaded], "info")
+
+func _sample_environment(delta: float):
+	if _environment_service == null:
+		return
+	var leader_vel = (components_group.global_position - _prev_leader_pos) / max(delta, 0.0001)
+	_env_state = _environment_service.sample_state(sim_time, components_group.global_position, leader_vel)
+	if is_instance_valid(camera) and camera.environment != null:
+		_environment_service.apply_environment_lighting(camera.environment, sim_time)
+
+func _update_swarm_and_telemetry(delta: float):
+	var leader_vel = (components_group.global_position - _prev_leader_pos) / max(delta, 0.0001)
+	if _swarm_enabled and _swarm_controller != null:
+		_swarm_controller.update_followers(delta, components_group.global_position, leader_vel, _env_state.get("wind", Vector3.ZERO))
+
+	_telemetry_sample_timer += delta
+	if _telemetry_recorder != null and _telemetry_recorder.is_active() and _telemetry_sample_timer >= (1.0 / max(_telemetry_sample_rate, 1.0)):
+		_telemetry_sample_timer = 0.0
+		var accel = (leader_vel - _prev_leader_vel) / max(delta, 0.0001)
+		_telemetry_recorder.record({
+			"ts": Time.get_unix_time_from_system(),
+			"sim_time": sim_time,
+			"position": components_group.global_position,
+			"velocity": leader_vel,
+			"acceleration": accel,
+			"wind": _env_state.get("wind", Vector3.ZERO),
+			"emi": _env_state.get("emi", Vector3.ZERO),
+			"luminance": float(_env_state.get("luminance", 1.0)),
+			"swarm_count": _swarm_controller.follower_count() if _swarm_controller != null else 0,
+		})
+
+	_prev_leader_pos = components_group.global_position
+	_prev_leader_vel = leader_vel
 
 func _setup_onboarding_ui():
 	_onboarding_steps = [
@@ -1809,6 +1921,15 @@ func _input(event):
 		# Camera shortcuts
 		if event.keycode == KEY_HOME:
 			_reset_camera()
+		if event.keycode == KEY_F6:
+			_toggle_telemetry_recording()
+		if event.keycode == KEY_F7 and not sim_locked:
+			_toggle_swarm()
+		if event.keycode == KEY_F8:
+			_low_hardware_mode = not _low_hardware_mode
+			if _environment_service != null:
+				_environment_service.configure({"low_hardware_mode": _low_hardware_mode})
+			_log("Low hardware mode: " + ("ON" if _low_hardware_mode else "OFF"), "info")
 		if event.keycode == KEY_F9 and not sim_locked:
 			_run_guided_remediation()
 		if event.keycode == KEY_F and not sim_locked:
@@ -2494,6 +2615,12 @@ func _on_play():
 	sim_target_rot = Vector3.ZERO
 	sim_label.text = "Step 1/" + str(sim_sequence.size()) + ": " + sim_sequence[0].type
 	topbar_status.text = "playing"
+	_prev_leader_pos = components_group.global_position
+	_prev_leader_vel = Vector3.ZERO
+	if _telemetry_recorder != null and not _telemetry_recorder.is_active():
+		var start_result = _telemetry_recorder.start_session("drone")
+		if bool(start_result.get("ok", false)):
+			_track_event("telemetry_started", {"session": str(start_result.get("session_id", "")), "auto": true})
 	
 	# ── PhysicsBridge: Configure and arm ──
 	if _bridge_active():
@@ -2587,12 +2714,16 @@ func _on_stop():
 		bridge.cmd_stop()
 		_log("Bridge: Simulation stopped & reset", "info")
 	_track_event("simulation_stopped", {"elapsed": sim_time})
+	if _telemetry_recorder != null and _telemetry_recorder.is_active():
+		_telemetry_recorder.stop_session()
+		_track_event("telemetry_stopped", {"auto": true})
 	
 	# Unlock UI (all modes)
 	_set_ui_locked(false)
 
 func _simulate(delta: float):
 	sim_time += delta
+	_sample_environment(delta)
 	var check = _preflight_check()
 	
 	# Live step progress indicator
@@ -2619,16 +2750,19 @@ func _simulate(delta: float):
 
 	if check.capability == "Cannot fly" and not _bridge_active():
 		components_group.position.y = lerp(components_group.position.y, 0.0, 0.08)
+		_update_swarm_and_telemetry(delta)
 		return
 
 	# ── BRIDGE PHYSICS MODE ──
 	if _bridge_active() and use_bridge_physics:
 		_simulate_bridge(delta)
+		_update_swarm_and_telemetry(delta)
 		_update_diagnostics()  # Live diagnostics during sim
 		return
 
 	# ── KINEMATIC FALLBACK MODE ──
 	_simulate_kinematic(delta, check)
+	_update_swarm_and_telemetry(delta)
 	_update_diagnostics()  # Live diagnostics during sim
 
 func _bridge_active() -> bool:
@@ -2687,11 +2821,13 @@ func _on_bridge_state(state: Dictionary):
 	
 	# Apply position from physics engine
 	var target_pos = Vector3(pos_arr[0], pos_arr[1], pos_arr[2])
+	target_pos += _env_state.get("wind", Vector3.ZERO) * 0.05
 	components_group.position = components_group.position.lerp(target_pos, 0.3)
 	
 	# Apply quaternion rotation from physics engine
 	var quat = Quaternion(rot_arr[0], rot_arr[1], rot_arr[2], rot_arr[3])
 	var target_euler = quat.get_euler()
+	target_euler += _env_state.get("emi", Vector3.ZERO) * 0.06
 	components_group.rotation = components_group.rotation.lerp(target_euler, 0.3)
 	
 	# Update status display
@@ -2766,6 +2902,7 @@ func _simulate_kinematic(delta: float, check: Dictionary):
 	var final_target = sim_target_pos
 	if check.capability == "Cannot fly":
 		final_target.y = 0.0
+	final_target += _env_state.get("wind", Vector3.ZERO) * delta * 0.45
 	
 	components_group.position = components_group.position.lerp(final_target, 0.05)
 	
@@ -2779,6 +2916,8 @@ func _simulate_kinematic(delta: float, check: Dictionary):
 	
 	var tilt_x = check.tilt_x * 0.2 + dynamic_pitch + sin(sim_time*1.5)*0.01
 	var tilt_z = check.tilt_z * 0.2 + dynamic_roll + cos(sim_time*1.5)*0.01
+	tilt_x += _env_state.get("emi", Vector3.ZERO).x * 0.04
+	tilt_z += _env_state.get("emi", Vector3.ZERO).z * 0.04
 	
 	components_group.rotation.x = lerp(components_group.rotation.x, tilt_x, 0.1)
 	components_group.rotation.z = lerp(components_group.rotation.z, tilt_z, 0.1)
@@ -3033,6 +3172,28 @@ func _update_diagnostics():
 	issues.append_array(wiring_issues)
 	if wiring_issues.size() > 0:
 		issues.append(_diag_issue(DIAG_SEV_INFO, "Press F9 to auto-fix common wiring issues"))
+
+	issues.append(_diag_issue(
+		DIAG_SEV_INFO,
+		"Env wind=(%.2f, %.2f, %.2f), EMI=(%.2f, %.2f, %.2f), light=%.2f" % [
+			_env_state.get("wind", Vector3.ZERO).x,
+			_env_state.get("wind", Vector3.ZERO).y,
+			_env_state.get("wind", Vector3.ZERO).z,
+			_env_state.get("emi", Vector3.ZERO).x,
+			_env_state.get("emi", Vector3.ZERO).y,
+			_env_state.get("emi", Vector3.ZERO).z,
+			float(_env_state.get("luminance", 1.0)),
+		]
+	))
+	issues.append(_diag_issue(
+		DIAG_SEV_INFO,
+		"Swarm=%s (%d), Telemetry=%s, LowHW=%s" % [
+			"ON" if _swarm_enabled else "OFF",
+			_swarm_controller.follower_count() if _swarm_controller != null else 0,
+			"ON" if (_telemetry_recorder != null and _telemetry_recorder.is_active()) else "OFF",
+			"ON" if _low_hardware_mode else "OFF",
+		]
+	))
 
 	diag_text.text = _format_diagnostics(issues)
 

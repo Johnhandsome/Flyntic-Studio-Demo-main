@@ -26,6 +26,15 @@ This backlog is ordered by business impact and release risk.
 - [ ] Add team workspace and role permissions.
 - [ ] Add usage-based insights for pricing optimization.
 
+## P3 - Autonomous and Data Platform
+
+- [x] Add modular environment physics (wind/EMI/light) with low-hardware profile.
+- [x] Add baseline swarm drone controller.
+- [x] Add physics telemetry recorder (JSONL/CSV sessions).
+- [ ] Add deterministic replay runner from telemetry + seed.
+- [ ] Add mission planner for autonomous workflows.
+- [ ] Add sensor-model plugins (GPS/IMU/barometer/vision) with profile-gated fidelity.
+
 ## Suggested Sprint Mapping
 
 ## Sprint 1 (Week 1-2)
@@ -52,3 +61,10 @@ This backlog is ordered by business impact and release risk.
 - [ ] Entitlement integration
 - [ ] Plan gating (Free/Pro)
 - [ ] Paid beta launch prep
+
+## Sprint 6 (Week 11-12)
+- [x] Environment module integration
+- [x] Swarm baseline integration
+- [x] Telemetry recorder integration
+- [ ] Deterministic replay tool
+- [ ] Mission planner MVP
