@@ -1,0 +1,412 @@
+@model StudioViewModel
+@{
+    ViewData["Title"] = "Drone Assembly Studio";
+    Layout = "~/Views/Shared/_Layout.cshtml";
+}
+
+<div class="studio-main">
+    <!-- Left Sidebar - Hierarchy & Components -->
+    <aside class="panel panel-left">
+        <div class="panel-header">
+            <i class="bi bi-diagram-3"></i> Hierarchy
+            <button class="hierarchy-add-btn" onclick="addNewLayer()" title="Add Layer">
+                <i class="bi bi-plus"></i>
+            </button>
+        </div>
+        <div class="panel-content">
+            <div class="hierarchy-tree" id="hierarchyTree">
+                @await Html.PartialAsync("_HierarchyTree", Model.HierarchyTree)
+            </div>
+        </div>
+        
+        <div class="panel-header">
+            <i class="bi bi-box-seam"></i> Components
+        </div>
+        <div class="panel-content component-palette">
+            @foreach (var group in Model.AvailableComponents.GroupBy(c => c.Type))
+            {
+                <div class="component-group">
+                    <div class="component-group-header" data-bs-toggle="collapse" data-bs-target="#group-@group.Key">
+                        <i class="bi bi-chevron-down"></i> @group.Key
+                    </div>
+                    <div class="collapse show" id="group-@group.Key">
+                        @foreach (var component in group)
+                        {
+                            <div class="component-item" 
+                                 draggable="true" 
+                                 data-component-id="@component.Id"
+                                 data-component-name="@component.Name"
+                                 data-component-type="@component.Type"
+                                 data-component-width="@component.Width"
+                                 data-component-height="@component.Height"
+                                 data-component-color="@component.Color"
+                                 data-component-icon="@component.IconClass"
+                                 title="@component.Description">
+                                <i class="bi @component.IconClass" style="color: @component.Color"></i>
+                                <span>@component.Name</span>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </aside>
+
+    <!-- Center Workspace with Tabs -->
+    <main class="workspace">
+                <!-- Wiring Zoom View (hidden by default, shown in wiring mode) -->
+                <div id="wiringZoomView" style="display:none; position:absolute; top:80px; right:20px; width:320px; height:320px; z-index:1000; background:#222; border-radius:12px; box-shadow:0 2px 12px #0008; overflow:hidden; border:2px solid #00ffcc;">
+                    <!-- Three.js canvas or overlay will be injected here -->
+                    <div id="wiringZoomCanvas" style="width:100%;height:100%;"></div>
+                    <div id="wiringZoomWarning" style="display:none; position:absolute; top:10px; left:10px; color:#ffc107; font-size:2rem;">
+                        <i class="bi bi-exclamation-triangle-fill"></i>
+                        <span id="wiringZoomWarningText" style="font-size:1rem;vertical-align:middle;margin-left:8px;"></span>
+                    </div>
+                </div>
+        <!-- Tab Bar -->
+        <div class="workspace-tabs">
+            <button class="workspace-tab active" onclick="switchTab('canvas')" data-tab="canvas">
+                <i class="bi bi-grid-3x3-gap"></i> Canvas
+            </button>
+            <button class="workspace-tab" onclick="switchTab('blocks')" data-tab="blocks">
+                <i class="bi bi-puzzle"></i> Blocks
+            </button>
+            <button class="workspace-tab" onclick="switchTab('code')" data-tab="code">
+                <i class="bi bi-code-slash"></i> Code
+            </button>
+        </div>
+        
+        <!-- Tab Content -->
+        <div class="tab-content-area">
+                        <!-- Wiring button: always visible above canvas -->
+                        <div style="width:100%;display:flex;justify-content:flex-end;margin-bottom:8px;">
+                            <button class="btn btn-info btn-sm fw-bold" id="btnWiringAlt" onclick="toggleWiringMode()" title="Wiring Mode" style="font-size:1.1rem;">
+                                <i class="bi bi-connector-plus"></i> Wiring
+                            </button>
+                        </div>
+            <!-- Canvas Tab -->
+            <div class="tab-pane active" id="tab-canvas">
+                <div class="canvas-area">
+                    <div class="assembly-canvas" id="assemblyCanvas">
+                        <div class="grid-overlay" id="gridOverlay">
+                            <!-- Placed components render here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Blocks Tab (Scratch-like Visual Programming) -->
+            <div class="tab-pane" id="tab-blocks">
+                <div class="visual-programming">
+                    <!-- Block Categories -->
+                    <div class="block-categories">
+                        <div class="block-category events active" onclick="selectCategory('events')">
+                            <i class="bi bi-flag"></i><br>Events
+                        </div>
+                        <div class="block-category motion" onclick="selectCategory('motion')">
+                            <i class="bi bi-arrows-move"></i><br>Motion
+                        </div>
+                        <div class="block-category control" onclick="selectCategory('control')">
+                            <i class="bi bi-arrow-repeat"></i><br>Control
+                        </div>
+                        <div class="block-category sensing" onclick="selectCategory('sensing')">
+                            <i class="bi bi-eye"></i><br>Sensing
+                        </div>
+                        <div class="block-category operators" onclick="selectCategory('operators')">
+                            <i class="bi bi-plus-slash-minus"></i><br>Operators
+                        </div>
+                        <div class="block-category variables" onclick="selectCategory('variables')">
+                            <i class="bi bi-box"></i><br>Variables
+                        </div>
+                    </div>
+                    
+                    <!-- Block Palette -->
+                    <div class="block-palette" id="blockPalette">
+                        <!-- Events blocks (shown by default) -->
+                        <div class="events-blocks">
+                            <div class="block-palette-title">Events</div>
+                            <div class="code-block events" draggable="true" data-block-type="on-start">
+                                <i class="bi bi-flag-fill"></i> When <i class="bi bi-play-fill" style="color:#4caf50"></i> clicked
+                            </div>
+                            <div class="code-block events" draggable="true" data-block-type="on-key">
+                                <i class="bi bi-keyboard"></i> When key pressed
+                            </div>
+                            <div class="code-block events" draggable="true" data-block-type="on-message">
+                                <i class="bi bi-envelope"></i> When I receive message
+                            </div>
+                        </div>
+                        
+                        <!-- Motion blocks (hidden by default) -->
+                        <div class="motion-blocks" style="display:none;">
+                            <div class="block-palette-title">Motion</div>
+                            <div class="code-block motion" draggable="true" data-block-type="takeoff">
+                                <i class="bi bi-arrow-up-circle"></i> Take Off
+                            </div>
+                            <div class="code-block motion" draggable="true" data-block-type="land">
+                                <i class="bi bi-arrow-down-circle"></i> Land
+                            </div>
+                            <div class="code-block motion" draggable="true" data-block-type="move-up">
+                                <i class="bi bi-arrow-up"></i> Move Up <input type="number" value="10" onclick="event.stopPropagation()"> cm
+                            </div>
+                            <div class="code-block motion" draggable="true" data-block-type="move-down">
+                                <i class="bi bi-arrow-down"></i> Move Down <input type="number" value="10" onclick="event.stopPropagation()"> cm
+                            </div>
+                            <div class="code-block motion" draggable="true" data-block-type="move-forward">
+                                <i class="bi bi-arrow-right"></i> Forward <input type="number" value="50" onclick="event.stopPropagation()"> cm
+                            </div>
+                            <div class="code-block motion" draggable="true" data-block-type="move-back">
+                                <i class="bi bi-arrow-left"></i> Back <input type="number" value="50" onclick="event.stopPropagation()"> cm
+                            </div>
+                            <div class="code-block motion" draggable="true" data-block-type="rotate-left">
+                                <i class="bi bi-arrow-counterclockwise"></i> Turn Left <input type="number" value="90" onclick="event.stopPropagation()"> °
+                            </div>
+                            <div class="code-block motion" draggable="true" data-block-type="rotate-right">
+                                <i class="bi bi-arrow-clockwise"></i> Turn Right <input type="number" value="90" onclick="event.stopPropagation()"> °
+                            </div>
+                            <div class="code-block motion" draggable="true" data-block-type="hover">
+                                <i class="bi bi-pause-circle"></i> Hover <input type="number" value="3" onclick="event.stopPropagation()"> sec
+                            </div>
+                        </div>
+                        
+                        <!-- Control blocks -->
+                        <div class="control-blocks" style="display:none;">
+                            <div class="block-palette-title">Control</div>
+                            <div class="code-block control" draggable="true" data-block-type="wait">
+                                <i class="bi bi-hourglass"></i> Wait <input type="number" value="1" onclick="event.stopPropagation()"> sec
+                            </div>
+                            <div class="code-block control" draggable="true" data-block-type="repeat">
+                                <i class="bi bi-arrow-repeat"></i> Repeat <input type="number" value="10" onclick="event.stopPropagation()"> times
+                            </div>
+                            <div class="code-block control" draggable="true" data-block-type="forever">
+                                <i class="bi bi-infinity"></i> Forever
+                            </div>
+                            <div class="code-block control" draggable="true" data-block-type="if">
+                                <i class="bi bi-question-circle"></i> If then
+                            </div>
+                            <div class="code-block control" draggable="true" data-block-type="stop">
+                                <i class="bi bi-stop-circle"></i> Stop all
+                            </div>
+                        </div>
+                        
+                        <!-- Sensing blocks -->
+                        <div class="sensing-blocks" style="display:none;">
+                            <div class="block-palette-title">Sensing</div>
+                            <div class="code-block sensing" draggable="true" data-block-type="altitude">
+                                <i class="bi bi-rulers"></i> Altitude
+                            </div>
+                            <div class="code-block sensing" draggable="true" data-block-type="battery">
+                                <i class="bi bi-battery-half"></i> Battery %
+                            </div>
+                            <div class="code-block sensing" draggable="true" data-block-type="distance">
+                                <i class="bi bi-arrows-expand"></i> Distance
+                            </div>
+                            <div class="code-block sensing" draggable="true" data-block-type="speed">
+                                <i class="bi bi-speedometer"></i> Speed
+                            </div>
+                        </div>
+                        
+                        <!-- Operators -->
+                        <div class="operators-blocks" style="display:none;">
+                            <div class="block-palette-title">Operators</div>
+                            <div class="code-block operators" draggable="true" data-block-type="add">
+                                <input type="number" value="0" onclick="event.stopPropagation()"> + <input type="number" value="0" onclick="event.stopPropagation()">
+                            </div>
+                            <div class="code-block operators" draggable="true" data-block-type="subtract">
+                                <input type="number" value="0" onclick="event.stopPropagation()"> - <input type="number" value="0" onclick="event.stopPropagation()">
+                            </div>
+                            <div class="code-block operators" draggable="true" data-block-type="greater">
+                                <input type="number" value="0" onclick="event.stopPropagation()"> &gt; <input type="number" value="50" onclick="event.stopPropagation()">
+                            </div>
+                            <div class="code-block operators" draggable="true" data-block-type="less">
+                                <input type="number" value="0" onclick="event.stopPropagation()"> &lt; <input type="number" value="50" onclick="event.stopPropagation()">
+                            </div>
+                        </div>
+                        
+                        <!-- Variables -->
+                        <div class="variables-blocks" style="display:none;">
+                            <div class="block-palette-title">Variables</div>
+                            <div class="code-block variables" draggable="true" data-block-type="set-var">
+                                <i class="bi bi-box"></i> Set speed to <input type="number" value="100" onclick="event.stopPropagation()">
+                            </div>
+                            <div class="code-block variables" draggable="true" data-block-type="change-var">
+                                <i class="bi bi-plus-circle"></i> Change speed by <input type="number" value="10" onclick="event.stopPropagation()">
+                            </div>
+                            <div class="code-block variables" draggable="true" data-block-type="show-var">
+                                <i class="bi bi-eye"></i> Show variable
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Code Workspace (Drop area) -->
+                    <div class="code-workspace" id="codeWorkspace">
+                        <div class="code-workspace-inner" id="codeWorkspaceInner">
+                            <!-- Dropped blocks appear here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Code Tab -->
+            <div class="tab-pane" id="tab-code">
+                <div class="code-editor-area">
+                    <textarea class="code-editor" id="codeEditor" placeholder="// Generated code will appear here
+// You can also write your own drone control code
+
+async function runDrone() {
+    await drone.takeoff();
+    await drone.moveUp(100);
+    await drone.hover(2000);
+    await drone.land();
+}
+"></textarea>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Console Panel -->
+        <div class="console-panel">
+            <div class="console-header">
+                <div class="console-tabs">
+                    <button class="console-tab active" onclick="switchConsoleTab('console')">Console</button>
+                    <button class="console-tab" onclick="switchConsoleTab('output')">Output</button>
+                    <button class="console-tab" onclick="switchConsoleTab('problems')">Problems</button>
+                </div>
+                <div class="console-actions">
+                    <button onclick="clearConsole()" title="Clear"><i class="bi bi-trash"></i></button>
+                </div>
+            </div>
+            <div class="console-content" id="consoleContent">
+                <div class="console-line info">
+                    <span class="time">[00:00:00]</span>
+                    <span class="message">Flyntic Studio initialized</span>
+                </div>
+                <div class="console-line success">
+                    <span class="time">[00:00:01]</span>
+                    <span class="message">Ready to design and simulate</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Status Bar -->
+        <div class="workspace-statusbar">
+            <span id="statusMessage">Ready</span>
+            <span id="cursorPosition">Grid: 0, 0</span>
+            <span id="componentCount">Components: 0</span>
+        </div>
+    </main>
+
+    <!-- Right Sidebar - Monitors -->
+    <aside class="panel panel-right">
+        <!-- Simulation Controls -->
+        <div class="simulation-panel">
+            <div class="simulation-controls-inline">
+                <button class="sim-btn" id="btnPlay" onclick="togglePlay()" title="Play">
+                    <i class="bi bi-play-fill" id="playIcon"></i>
+                </button>
+                <button class="sim-btn" id="btnPause" onclick="pauseSimulation()" title="Pause" disabled>
+                    <i class="bi bi-pause-fill"></i>
+                </button>
+                <button class="sim-btn" id="btnStop" onclick="stopSimulation()" title="Stop">
+                    <i class="bi bi-stop-fill"></i>
+                </button>
+            </div>
+            <div class="simulation-status" id="canvasStatus">Ready</div>
+        </div>
+        
+        <div class="panel-header">
+            <i class="bi bi-speedometer2"></i> Monitors
+        </div>
+        <div class="panel-content">
+            <div class="monitor-section">
+                <h6><i class="bi bi-clipboard-data"></i> Performance</h6>
+                
+                <div class="monitor-item">
+                    <span class="monitor-label">Total Weight</span>
+                    <span class="monitor-value" id="monitorWeight">0 g</span>
+                </div>
+                
+                <div class="monitor-item">
+                    <span class="monitor-label">Total Thrust</span>
+                    <span class="monitor-value" id="monitorThrust">0 kg</span>
+                </div>
+                
+                <div class="monitor-item highlight">
+                    <span class="monitor-label">Thrust/Weight</span>
+                    <span class="monitor-value" id="monitorRatio">0:1</span>
+                </div>
+                
+                <div class="monitor-item">
+                    <span class="monitor-label">Capability</span>
+                    <span class="monitor-value badge bg-secondary" id="monitorCapability">N/A</span>
+                </div>
+            </div>
+            
+            <div class="monitor-section">
+                <h6><i class="bi bi-lightning-charge"></i> Power</h6>
+                
+                <div class="monitor-item">
+                    <span class="monitor-label">Power</span>
+                    <span class="monitor-value" id="monitorPower">0 W</span>
+                </div>
+                
+                <div class="monitor-item">
+                    <span class="monitor-label">Battery</span>
+                    <span class="monitor-value" id="monitorCapacity">0 mAh</span>
+                </div>
+                
+                <div class="monitor-item highlight">
+                    <span class="monitor-label">Flight Time</span>
+                    <span class="monitor-value" id="monitorFlightTime">0 min</span>
+                </div>
+            </div>
+            
+            <div class="monitor-section">
+                <h6><i class="bi bi-exclamation-triangle"></i> Diagnostics</h6>
+                <div class="diagnostics-list" id="diagnosticsList">
+                    <div class="diagnostic-item info">
+                        <i class="bi bi-info-circle"></i> Add components to start
+                    </div>
+                </div>
+            </div>
+            
+            <div class="monitor-section">
+                <h6><i class="bi bi-pie-chart"></i> Weight</h6>
+                <div class="weight-breakdown">
+                    <div class="breakdown-bar">
+                        <div class="bar-segment frame" style="width: 25%"></div>
+                        <div class="bar-segment motors" style="width: 25%"></div>
+                        <div class="bar-segment battery" style="width: 25%"></div>
+                        <div class="bar-segment other" style="width: 25%"></div>
+                    </div>
+                    <div class="breakdown-legend">
+                        <span><i class="legend-dot frame"></i>Frame</span>
+                        <span><i class="legend-dot motors"></i>Motors</span>
+                        <span><i class="legend-dot battery"></i>Battery</span>
+                        <span><i class="legend-dot other"></i>Other</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </aside>
+</div>
+
+<!-- Context Menu -->
+<div class="context-menu" id="contextMenu">
+    <div class="context-menu-item" onclick="deleteSelected()">
+        <i class="bi bi-trash"></i> Delete
+    </div>
+    <div class="context-menu-item" onclick="duplicateSelected()">
+        <i class="bi bi-copy"></i> Duplicate
+    </div>
+    <div class="context-menu-divider"></div>
+    <div class="context-menu-item" onclick="rotateSelected()">
+        <i class="bi bi-arrow-clockwise"></i> Rotate
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        window.initialComponents = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.AvailableComponents));
+        window.placedComponents = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(Model.Configuration.PlacedComponents));
+    </script>
+}

@@ -1,0 +1,52 @@
+@model HierarchyNodeDto
+
+<div class="hierarchy-node @(Model.Children.Any() ? "has-children" : "") @(Model.IsLayer ? "is-layer" : "")" 
+     data-node-id="@Model.Id" 
+     data-is-layer="@Model.IsLayer.ToString().ToLower()"
+     ondragover="onHierarchyDragOver(event)"
+     ondrop="onHierarchyDrop(event, '@Model.Id')">
+    <div class="hierarchy-node-content" 
+         onclick="selectHierarchyNode('@Model.Id', event)"
+         draggable="@(Model.Id != "root" ? "true" : "false")"
+         ondragstart="onHierarchyDragStart(event, '@Model.Id')">
+        @if (Model.Children.Any() || Model.IsLayer || Model.Id == "root")
+        {
+            <span class="hierarchy-toggle @(Model.IsExpanded ? "expanded" : "")" onclick="toggleNode(this); event.stopPropagation();">
+                <i class="bi bi-chevron-right"></i>
+            </span>
+        }
+        else
+        {
+            <span class="hierarchy-spacer"></span>
+        }
+        @if (Model.IsLayer)
+        {
+            <i class="bi bi-folder"></i>
+        }
+        else if (Model.Id == "root")
+        {
+            <i class="bi bi-cpu"></i>
+        }
+        else
+        {
+            <i class="bi bi-box"></i>
+        }
+        <span class="hierarchy-name">@Model.Name</span>
+        @if (Model.Id != "root")
+        {
+            <button class="hierarchy-delete-btn" onclick="deleteFromHierarchy('@Model.Id', event)" title="Delete">
+                <i class="bi bi-x"></i>
+            </button>
+        }
+    </div>
+    
+    @if (Model.Children.Any() || Model.IsLayer || Model.Id == "root")
+    {
+        <div class="hierarchy-children @(Model.IsExpanded ? "expanded" : "collapsed")">
+            @foreach (var child in Model.Children)
+            {
+                @await Html.PartialAsync("_HierarchyTree", child)
+            }
+        </div>
+    }
+</div>

@@ -1,0 +1,348 @@
+<?xml version="1.0" ?>
+<sdf version="1.9">
+  <model name="flyntic_drone">
+    <static>false</static>
+    <self_collide>false</self_collide>
+
+    <!-- ═══════════════ MAIN BODY ═══════════════ -->
+    <link name="base_link">
+      <pose>0 0 0.15 0 0 0</pose>
+      <inertial>
+        <mass>0.45</mass>
+        <inertia>
+          <ixx>0.005</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.009</iyy><iyz>0</iyz>
+          <izz>0.005</izz>
+        </inertia>
+      </inertial>
+
+      <!-- Frame collision -->
+      <collision name="body_collision">
+        <geometry>
+          <box><size>0.35 0.35 0.08</size></box>
+        </geometry>
+      </collision>
+
+      <!-- Frame visual — central body -->
+      <visual name="body_visual">
+        <geometry>
+          <box><size>0.35 0.35 0.06</size></box>
+        </geometry>
+        <material>
+          <ambient>0.2 0.2 0.2 1</ambient>
+          <diffuse>0.3 0.3 0.3 1</diffuse>
+        </material>
+      </visual>
+
+      <!-- Arms (4 diagonal) -->
+      <visual name="arm_fl">
+        <pose>0.11 0.11 0 0 0 0.785</pose>
+        <geometry><box><size>0.34 0.025 0.02</size></box></geometry>
+        <material><diffuse>0.15 0.15 0.15 1</diffuse></material>
+      </visual>
+      <visual name="arm_fr">
+        <pose>0.11 -0.11 0 0 0 -0.785</pose>
+        <geometry><box><size>0.34 0.025 0.02</size></box></geometry>
+        <material><diffuse>0.15 0.15 0.15 1</diffuse></material>
+      </visual>
+      <visual name="arm_bl">
+        <pose>-0.11 0.11 0 0 0 -0.785</pose>
+        <geometry><box><size>0.34 0.025 0.02</size></box></geometry>
+        <material><diffuse>0.15 0.15 0.15 1</diffuse></material>
+      </visual>
+      <visual name="arm_br">
+        <pose>-0.11 -0.11 0 0 0 0.785</pose>
+        <geometry><box><size>0.34 0.025 0.02</size></box></geometry>
+        <material><diffuse>0.15 0.15 0.15 1</diffuse></material>
+      </visual>
+
+      <!-- Landing gear -->
+      <visual name="skid_left">
+        <pose>0 0.08 -0.1 1.5708 0 0</pose>
+        <geometry><cylinder><radius>0.005</radius><length>0.25</length></cylinder></geometry>
+        <material><diffuse>0.1 0.1 0.1 1</diffuse></material>
+      </visual>
+      <visual name="skid_right">
+        <pose>0 -0.08 -0.1 1.5708 0 0</pose>
+        <geometry><cylinder><radius>0.005</radius><length>0.25</length></cylinder></geometry>
+        <material><diffuse>0.1 0.1 0.1 1</diffuse></material>
+      </visual>
+
+      <!-- ── SENSORS ── -->
+      <sensor name="imu_sensor" type="imu">
+        <always_on>true</always_on>
+        <update_rate>200</update_rate>
+        <imu>
+          <angular_velocity>
+            <x><noise><type>gaussian</type><mean>0</mean><stddev>0.001</stddev></noise></x>
+            <y><noise><type>gaussian</type><mean>0</mean><stddev>0.001</stddev></noise></y>
+            <z><noise><type>gaussian</type><mean>0</mean><stddev>0.001</stddev></noise></z>
+          </angular_velocity>
+          <linear_acceleration>
+            <x><noise><type>gaussian</type><mean>0</mean><stddev>0.01</stddev></noise></x>
+            <y><noise><type>gaussian</type><mean>0</mean><stddev>0.01</stddev></noise></y>
+            <z><noise><type>gaussian</type><mean>0</mean><stddev>0.01</stddev></noise></z>
+          </linear_acceleration>
+        </imu>
+      </sensor>
+    </link>
+
+    <!-- ═══════════════ ROTOR FL (Front Left) ═══════════════ -->
+    <link name="rotor_fl">
+      <pose relative_to="base_link">0.155 0.155 0.035 0 0 0</pose>
+      <inertial>
+        <mass>0.025</mass>
+        <inertia>
+          <ixx>0.00001</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.00001</iyy><iyz>0</iyz>
+          <izz>0.00002</izz>
+        </inertia>
+      </inertial>
+      <visual name="rotor_fl_visual">
+        <geometry><cylinder><radius>0.065</radius><length>0.005</length></cylinder></geometry>
+        <material><diffuse>0.9 0.2 0.2 0.6</diffuse></material>
+      </visual>
+      <collision name="rotor_fl_collision">
+        <geometry><cylinder><radius>0.065</radius><length>0.005</length></cylinder></geometry>
+      </collision>
+    </link>
+
+    <joint name="rotor_fl_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>rotor_fl</child>
+      <axis><xyz>0 0 1</xyz>
+        <limit><lower>-1e16</lower><upper>1e16</upper></limit>
+      </axis>
+    </joint>
+
+    <!-- ═══════════════ ROTOR FR (Front Right) ═══════════════ -->
+    <link name="rotor_fr">
+      <pose relative_to="base_link">0.155 -0.155 0.035 0 0 0</pose>
+      <inertial>
+        <mass>0.025</mass>
+        <inertia>
+          <ixx>0.00001</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.00001</iyy><iyz>0</iyz>
+          <izz>0.00002</izz>
+        </inertia>
+      </inertial>
+      <visual name="rotor_fr_visual">
+        <geometry><cylinder><radius>0.065</radius><length>0.005</length></cylinder></geometry>
+        <material><diffuse>0.2 0.2 0.9 0.6</diffuse></material>
+      </visual>
+      <collision name="rotor_fr_collision">
+        <geometry><cylinder><radius>0.065</radius><length>0.005</length></cylinder></geometry>
+      </collision>
+    </link>
+
+    <joint name="rotor_fr_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>rotor_fr</child>
+      <axis><xyz>0 0 1</xyz>
+        <limit><lower>-1e16</lower><upper>1e16</upper></limit>
+      </axis>
+    </joint>
+
+    <!-- ═══════════════ ROTOR BL (Back Left) ═══════════════ -->
+    <link name="rotor_bl">
+      <pose relative_to="base_link">-0.155 0.155 0.035 0 0 0</pose>
+      <inertial>
+        <mass>0.025</mass>
+        <inertia>
+          <ixx>0.00001</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.00001</iyy><iyz>0</iyz>
+          <izz>0.00002</izz>
+        </inertia>
+      </inertial>
+      <visual name="rotor_bl_visual">
+        <geometry><cylinder><radius>0.065</radius><length>0.005</length></cylinder></geometry>
+        <material><diffuse>0.2 0.9 0.2 0.6</diffuse></material>
+      </visual>
+      <collision name="rotor_bl_collision">
+        <geometry><cylinder><radius>0.065</radius><length>0.005</length></cylinder></geometry>
+      </collision>
+    </link>
+
+    <joint name="rotor_bl_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>rotor_bl</child>
+      <axis><xyz>0 0 1</xyz>
+        <limit><lower>-1e16</lower><upper>1e16</upper></limit>
+      </axis>
+    </joint>
+
+    <!-- ═══════════════ ROTOR BR (Back Right) ═══════════════ -->
+    <link name="rotor_br">
+      <pose relative_to="base_link">-0.155 -0.155 0.035 0 0 0</pose>
+      <inertial>
+        <mass>0.025</mass>
+        <inertia>
+          <ixx>0.00001</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.00001</iyy><iyz>0</iyz>
+          <izz>0.00002</izz>
+        </inertia>
+      </inertial>
+      <visual name="rotor_br_visual">
+        <geometry><cylinder><radius>0.065</radius><length>0.005</length></cylinder></geometry>
+        <material><diffuse>0.9 0.9 0.2 0.6</diffuse></material>
+      </visual>
+      <collision name="rotor_br_collision">
+        <geometry><cylinder><radius>0.065</radius><length>0.005</length></cylinder></geometry>
+      </collision>
+    </link>
+
+    <joint name="rotor_br_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>rotor_br</child>
+      <axis><xyz>0 0 1</xyz>
+        <limit><lower>-1e16</lower><upper>1e16</upper></limit>
+      </axis>
+    </joint>
+
+    <!-- ═══════════════ PLUGINS ═══════════════ -->
+
+    <!-- Multicopter motor model (applies forces based on rotor velocity commands) -->
+    <plugin filename="gz-sim-multicopter-motor-model-system"
+            name="gz::sim::systems::MulticopterMotorModel">
+      <robotNamespace>flyntic</robotNamespace>
+      <jointName>rotor_fl_joint</jointName>
+      <linkName>rotor_fl</linkName>
+      <turningDirection>ccw</turningDirection>
+      <timeConstantUp>0.0125</timeConstantUp>
+      <timeConstantDown>0.025</timeConstantDown>
+      <maxRotVelocity>1500</maxRotVelocity>
+      <motorConstant>5.84e-06</motorConstant>
+      <momentConstant>0.06</momentConstant>
+      <commandSubTopic>command/motor_speed</commandSubTopic>
+      <motorNumber>0</motorNumber>
+      <rotorDragCoefficient>2.0673e-04</rotorDragCoefficient>
+      <rollingMomentCoefficient>1e-06</rollingMomentCoefficient>
+      <motorSpeedPubTopic>motor_speed/0</motorSpeedPubTopic>
+      <rotorVelocitySlowdownSim>10</rotorVelocitySlowdownSim>
+      <motorType>velocity</motorType>
+    </plugin>
+
+    <plugin filename="gz-sim-multicopter-motor-model-system"
+            name="gz::sim::systems::MulticopterMotorModel">
+      <robotNamespace>flyntic</robotNamespace>
+      <jointName>rotor_fr_joint</jointName>
+      <linkName>rotor_fr</linkName>
+      <turningDirection>cw</turningDirection>
+      <timeConstantUp>0.0125</timeConstantUp>
+      <timeConstantDown>0.025</timeConstantDown>
+      <maxRotVelocity>1500</maxRotVelocity>
+      <motorConstant>5.84e-06</motorConstant>
+      <momentConstant>0.06</momentConstant>
+      <commandSubTopic>command/motor_speed</commandSubTopic>
+      <motorNumber>1</motorNumber>
+      <rotorDragCoefficient>2.0673e-04</rotorDragCoefficient>
+      <rollingMomentCoefficient>1e-06</rollingMomentCoefficient>
+      <motorSpeedPubTopic>motor_speed/1</motorSpeedPubTopic>
+      <rotorVelocitySlowdownSim>10</rotorVelocitySlowdownSim>
+      <motorType>velocity</motorType>
+    </plugin>
+
+    <plugin filename="gz-sim-multicopter-motor-model-system"
+            name="gz::sim::systems::MulticopterMotorModel">
+      <robotNamespace>flyntic</robotNamespace>
+      <jointName>rotor_bl_joint</jointName>
+      <linkName>rotor_bl</linkName>
+      <turningDirection>cw</turningDirection>
+      <timeConstantUp>0.0125</timeConstantUp>
+      <timeConstantDown>0.025</timeConstantDown>
+      <maxRotVelocity>1500</maxRotVelocity>
+      <motorConstant>5.84e-06</motorConstant>
+      <momentConstant>0.06</momentConstant>
+      <commandSubTopic>command/motor_speed</commandSubTopic>
+      <motorNumber>2</motorNumber>
+      <rotorDragCoefficient>2.0673e-04</rotorDragCoefficient>
+      <rollingMomentCoefficient>1e-06</rollingMomentCoefficient>
+      <motorSpeedPubTopic>motor_speed/2</motorSpeedPubTopic>
+      <rotorVelocitySlowdownSim>10</rotorVelocitySlowdownSim>
+      <motorType>velocity</motorType>
+    </plugin>
+
+    <plugin filename="gz-sim-multicopter-motor-model-system"
+            name="gz::sim::systems::MulticopterMotorModel">
+      <robotNamespace>flyntic</robotNamespace>
+      <jointName>rotor_br_joint</jointName>
+      <linkName>rotor_br</linkName>
+      <turningDirection>ccw</turningDirection>
+      <timeConstantUp>0.0125</timeConstantUp>
+      <timeConstantDown>0.025</timeConstantDown>
+      <maxRotVelocity>1500</maxRotVelocity>
+      <motorConstant>5.84e-06</motorConstant>
+      <momentConstant>0.06</momentConstant>
+      <commandSubTopic>command/motor_speed</commandSubTopic>
+      <motorNumber>3</motorNumber>
+      <rotorDragCoefficient>2.0673e-04</rotorDragCoefficient>
+      <rollingMomentCoefficient>1e-06</rollingMomentCoefficient>
+      <motorSpeedPubTopic>motor_speed/3</motorSpeedPubTopic>
+      <rotorVelocitySlowdownSim>10</rotorVelocitySlowdownSim>
+      <motorType>velocity</motorType>
+    </plugin>
+
+    <!-- Multicopter velocity control plugin -->
+    <plugin filename="gz-sim-multicopter-control-system"
+            name="gz::sim::systems::MulticopterVelocityControl">
+      <robotNamespace>flyntic</robotNamespace>
+      <commandSubTopic>cmd_vel</commandSubTopic>
+      <enableSubTopic>enable</enableSubTopic>
+      <comLinkName>base_link</comLinkName>
+
+      <velocityGain>3.0 3.0 3.0</velocityGain>
+      <attitudeGain>0.4 0.6 0.25</attitudeGain>
+      <angularRateGain>0.1 0.15 0.05</angularRateGain>
+      <maximumLinearAcceleration>3 3 5</maximumLinearAcceleration>
+
+      <rotorConfiguration>
+        <rotor>
+          <jointName>rotor_fl_joint</jointName>
+          <forceConstant>5.84e-06</forceConstant>
+          <momentConstant>0.06</momentConstant>
+          <direction>1</direction>
+        </rotor>
+        <rotor>
+          <jointName>rotor_fr_joint</jointName>
+          <forceConstant>5.84e-06</forceConstant>
+          <momentConstant>0.06</momentConstant>
+          <direction>-1</direction>
+        </rotor>
+        <rotor>
+          <jointName>rotor_bl_joint</jointName>
+          <forceConstant>5.84e-06</forceConstant>
+          <momentConstant>0.06</momentConstant>
+          <direction>-1</direction>
+        </rotor>
+        <rotor>
+          <jointName>rotor_br_joint</jointName>
+          <forceConstant>5.84e-06</forceConstant>
+          <momentConstant>0.06</momentConstant>
+          <direction>1</direction>
+        </rotor>
+      </rotorConfiguration>
+    </plugin>
+
+    <!-- Pose publisher (for bridge to read) -->
+    <plugin filename="gz-sim-pose-publisher-system"
+            name="gz::sim::systems::PosePublisher">
+      <publish_link_pose>true</publish_link_pose>
+      <publish_nested_model_pose>true</publish_nested_model_pose>
+      <update_frequency>50</update_frequency>
+    </plugin>
+
+    <!-- Odometry publisher -->
+    <plugin filename="gz-sim-odometry-publisher-system"
+            name="gz::sim::systems::OdometryPublisher">
+      <odom_frame>odom</odom_frame>
+      <robot_base_frame>base_link</robot_base_frame>
+      <odom_publish_frequency>50</odom_publish_frequency>
+    </plugin>
+
+    <!-- IMU system plugin -->
+    <plugin filename="gz-sim-imu-system"
+            name="gz::sim::systems::Imu">
+    </plugin>
+
+  </model>
+</sdf>
