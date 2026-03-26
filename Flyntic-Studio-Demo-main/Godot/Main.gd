@@ -583,6 +583,16 @@ func _setup_topbar_menu_actions():
 		guide_btn.add_theme_color_override("font_hover_color", Color(0.9, 0.9, 0.9, 1))
 		guide_btn.add_theme_font_size_override("font_size", 12)
 		topbar_menus.add_child(guide_btn)
+	if topbar_menus.get_node_or_null("Metrics") == null:
+		var metrics_btn = Button.new()
+		metrics_btn.name = "Metrics"
+		metrics_btn.text = "Metrics"
+		metrics_btn.flat = true
+		metrics_btn.focus_mode = Control.FOCUS_NONE
+		metrics_btn.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7, 1))
+		metrics_btn.add_theme_color_override("font_hover_color", Color(0.9, 0.9, 0.9, 1))
+		metrics_btn.add_theme_font_size_override("font_size", 12)
+		topbar_menus.add_child(metrics_btn)
 	for child in topbar_menus.get_children():
 		if child is BaseButton and not child.pressed.is_connected(_on_topbar_menu_pressed.bind(child)):
 			child.pressed.connect(_on_topbar_menu_pressed.bind(child))
@@ -593,7 +603,58 @@ func _on_topbar_menu_pressed(btn: BaseButton):
 	if btn.name == "Guide":
 		_start_onboarding(true)
 		return
+	if btn.name == "Metrics":
+		_show_analytics_dashboard()
+		return
 	_log("Menu: " + btn.text, "info")
+
+func _show_analytics_dashboard():
+	if not FileAccess.file_exists(ANALYTICS_EVENTS_PATH):
+		_log("No analytics events yet", "info")
+		return
+	var file = FileAccess.open(ANALYTICS_EVENTS_PATH, FileAccess.READ)
+	if file == null:
+		_log("Cannot open analytics events", "warning")
+		return
+	var total := 0
+	var counts := {}
+	var first_ts := 0.0
+	var last_ts := 0.0
+	while not file.eof_reached():
+		var line = file.get_line().strip_edges()
+		if line == "":
+			continue
+		var json = JSON.new()
+		if json.parse(line) != OK:
+			continue
+		if typeof(json.data) != TYPE_DICTIONARY:
+			continue
+		var evt: Dictionary = json.data
+		var name = str(evt.get("name", "unknown"))
+		counts[name] = int(counts.get(name, 0)) + 1
+		total += 1
+		var ts = float(evt.get("ts", 0.0))
+		if ts > 0.0:
+			if first_ts == 0.0 or ts < first_ts:
+				first_ts = ts
+			if ts > last_ts:
+				last_ts = ts
+	file.close()
+
+	var sim_started = int(counts.get("simulation_started", 0))
+	var sim_stopped = int(counts.get("simulation_stopped", 0))
+	var projects_saved = int(counts.get("project_saved", 0))
+	var projects_loaded = int(counts.get("project_loaded", 0))
+	var started_to_stopped = (float(sim_stopped) / float(max(sim_started, 1))) * 100.0
+
+	_log("Analytics dashboard", "info")
+	_log("Events total: %d" % total, "info")
+	if first_ts > 0.0 and last_ts > 0.0:
+		_log("Window: %s -> %s" % [Time.get_datetime_string_from_unix_time(first_ts), Time.get_datetime_string_from_unix_time(last_ts)], "info")
+	for k in counts.keys():
+		_log("- %s: %d" % [str(k), int(counts[k])], "info")
+	_log("Simulation completion proxy: %.1f%% (%d/%d)" % [started_to_stopped, sim_stopped, sim_started], "info")
+	_log("Projects saved/loaded: %d/%d" % [projects_saved, projects_loaded], "info")
 
 func _setup_onboarding_ui():
 	_onboarding_steps = [
@@ -766,8 +827,10 @@ func _finish_onboarding(mark_seen := true):
 	if mark_seen:
 		_onboarding_seen = true
 		_save_ui_prefs()
+		_track_event("onboarding_completed")
 		_log("Guide completed. Press F1 or Guide to replay.", "success")
 	else:
+		_track_event("onboarding_skipped")
 		_log("Guide skipped. Press F1 or Guide to replay.", "info")
 
 func _onboarding_apply_step():
@@ -2412,6 +2475,7 @@ func _on_play():
 	# Only block play if basic structure is missing
 	if check.reason == "No frame" or check.reason == "No battery":
 		_log("SYSTEM ERROR: " + check.reason, "error")
+		_track_event("simulation_start_blocked", {"reason": check.reason})
 		sim_label.text = "ERROR"
 		return
 
@@ -2431,6 +2495,7 @@ func _on_play():
 	
 	if sim_sequence.size() == 0:
 		_log("No sequence to execute. Connect blocks to 'When flag clicked'!", "warning")
+		_track_event("simulation_start_blocked", {"reason": "no_sequence"})
 		_set_ui_locked(false)
 		return
 

@@ -9,7 +9,7 @@ This backlog is ordered by business impact and release risk.
 - [x] Add autosave + crash recovery snapshots.
 - [x] Add schema version + migration for `.flyntic` project files.
 - [ ] Add end-to-end save/load round-trip test cases.
-- [ ] Add release smoke test checklist for every build.
+- [x] Add release smoke test checklist for every build.
 
 ## P1 - Must complete for strong paid value
 
@@ -17,7 +17,7 @@ This backlog is ordered by business impact and release risk.
 - [x] Add severity model (Error/Warning/Info) to diagnostics.
 - [x] Add guided remediation actions for top 10 preflight failures.
 - [x] Add analytics for onboarding and simulation funnel.
-- [ ] Add RC checklist and rollback playbook.
+- [x] Add RC checklist and rollback playbook.
 
 ## P2 - Scale and monetization maturity
 
@@ -45,8 +45,8 @@ This backlog is ordered by business impact and release risk.
 
 ## Sprint 4 (Week 7-8)
 - [x] Analytics instrumentation
-- [ ] Dashboard baseline
-- [ ] Beta release checklist
+- [x] Dashboard baseline
+- [x] Beta release checklist
 
 ## Sprint 5 (Week 9-10)
 - [ ] Entitlement integration
