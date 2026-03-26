@@ -74,3 +74,34 @@ func build_step_label(sim_step_idx: int, sim_sequence: Array, sim_step_timer: fl
 	var duration = float(step.get("duration", 0.01))
 	var pct = int((sim_step_timer / max(duration, 0.01)) * 100.0)
 	return "Step %d/%d: %s (%d%%)" % [sim_step_idx + 1, sim_sequence.size(), str(step.get("type", "step")), min(pct, 100)]
+
+func spin_propellers(payload: Dictionary):
+	var delta = float(payload.get("delta", 0.0))
+	var placed: Array = payload.get("placed", [])
+	var bridge_rpms: Array = payload.get("bridge_rpms", [])
+
+	var prop_idx := 0
+	for comp in placed:
+		if not is_instance_valid(comp.get("node")) or str(comp.get("type", "")) != "Propeller":
+			continue
+		for ch in comp.node.get_children():
+			if not is_instance_valid(ch) or ch.name != "prop_blade":
+				continue
+			var spin_speed := 35.0
+			if prop_idx < bridge_rpms.size() and float(bridge_rpms[prop_idx]) > 0.0:
+				spin_speed = float(bridge_rpms[prop_idx]) / 150.0
+			ch.rotation.y += delta * spin_speed
+			prop_idx += 1
+
+func settle_cannot_fly(payload: Dictionary) -> Dictionary:
+	var capability = str(payload.get("capability", ""))
+	var bridge_active = bool(payload.get("bridge_active", false))
+	var current_pos: Vector3 = payload.get("current_pos", Vector3.ZERO)
+	if capability != "Cannot fly" or bridge_active:
+		return {"handled": false, "position": current_pos}
+
+	current_pos.y = lerp(current_pos.y, 0.0, 0.08)
+	return {"handled": true, "position": current_pos}
+
+func should_force_bridge_land(safety_state: Dictionary) -> bool:
+	return bool(safety_state.get("active", false)) and str(safety_state.get("mode", "none")) == "land"

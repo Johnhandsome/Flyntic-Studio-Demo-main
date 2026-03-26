@@ -424,6 +424,7 @@ var _telemetry_validator: RefCounted = null
 var _runtime_mode_service: RefCounted = null
 var _runtime_input_service: RefCounted = null
 var _flight_assist_service: RefCounted = null
+var _simulation_coordinator_service: RefCounted = null
 var _mission_runtime_service: RefCounted = null
 var _swarm_telemetry_service: RefCounted = null
 var _mission_planner: RefCounted = null
@@ -643,6 +644,12 @@ func _init_environment_modules():
 		_flight_assist_service = flight_assist_script.new()
 	else:
 		_log("Flight assist service missing", "warning")
+
+	var simulation_coordinator_script = load("res://services/SimulationCoordinatorService.gd")
+	if simulation_coordinator_script != null:
+		_simulation_coordinator_service = simulation_coordinator_script.new()
+	else:
+		_log("Simulation coordinator service missing", "warning")
 
 	var mission_runtime_script = load("res://services/MissionRuntimeService.gd")
 	if mission_runtime_script != null:
@@ -3039,7 +3046,25 @@ func _on_stop():
 
 func _simulate(delta: float):
 	sim_time += delta
-	if _replay_active and _replay_runner != null:
+	if _simulation_coordinator_service != null:
+		var replay_state = _simulation_coordinator_service.handle_replay({
+			"replay_active": _replay_active,
+			"replay_runner": _replay_runner,
+			"sim_time": sim_time,
+			"current_pos": components_group.global_position,
+		})
+		if bool(replay_state.get("handled", false)):
+			components_group.global_position = replay_state.get("position", components_group.global_position)
+			var look_dir: Vector3 = replay_state.get("look_dir", Vector3.ZERO)
+			if look_dir.length() > 0.01:
+				components_group.look_at(components_group.global_position + look_dir, Vector3.UP)
+			if bool(replay_state.get("done", false)):
+				_track_event("replay_completed")
+			_replay_active = bool(replay_state.get("replay_active", _replay_active))
+			_update_swarm_and_telemetry(delta)
+			_update_diagnostics()
+			return
+	elif _replay_active and _replay_runner != null:
 		var replay = _replay_runner.sample(sim_time)
 		if bool(replay.get("ok", false)):
 			var row: Dictionary = replay.get("row", {})
@@ -3055,7 +3080,28 @@ func _simulate(delta: float):
 		return
 	_sample_environment(delta)
 	var check = _preflight_check()
-	if _safety_layer != null:
+	if _simulation_coordinator_service != null:
+		var safety_rt = _simulation_coordinator_service.apply_safety({
+			"safety_layer": _safety_layer,
+			"delta": delta,
+			"current_pos": components_group.global_position,
+			"sim_target_pos": sim_target_pos,
+			"battery_ratio": _estimate_remaining_battery_ratio(sim_time),
+			"sensor_health": float(_sensor_state.get("health", 1.0)),
+			"mission_active": _mission_active,
+			"mission_planner": _mission_planner,
+			"safety_state": _safety_state,
+		})
+		_safety_state = safety_rt.get("safety_state", _safety_state)
+		sim_target_pos = safety_rt.get("sim_target_pos", sim_target_pos)
+		_mission_active = bool(safety_rt.get("mission_active", _mission_active))
+		if bool(safety_rt.get("triggered", false)):
+			_log("Safety trigger: %s" % str(safety_rt.get("trigger_reason", "unknown")), "warning")
+			_track_event("safety_triggered", {
+				"mode": str(safety_rt.get("trigger_mode", "none")),
+				"reason": str(safety_rt.get("trigger_reason", "unknown")),
+			})
+	elif _safety_layer != null:
 		var battery_ratio = _estimate_remaining_battery_ratio(sim_time)
 		var sensor_health = float(_sensor_state.get("health", 1.0))
 		var previous_active = bool(_safety_state.get("active", false))
@@ -3080,34 +3126,56 @@ func _simulate(delta: float):
 	
 	# Live step progress indicator
 	if sim_step_idx < sim_sequence.size():
-		var step = sim_sequence[sim_step_idx]
-		var pct = int((sim_step_timer / max(step.duration, 0.01)) * 100.0)
-		sim_label.text = "Step %d/%d: %s (%d%%)" % [sim_step_idx + 1, sim_sequence.size(), step.type, min(pct, 100)]
+		if _simulation_coordinator_service != null:
+			var step_label = _simulation_coordinator_service.build_step_label(sim_step_idx, sim_sequence, sim_step_timer)
+			if step_label != "":
+				sim_label.text = step_label
+		else:
+			var step = sim_sequence[sim_step_idx]
+			var pct = int((sim_step_timer / max(step.duration, 0.01)) * 100.0)
+			sim_label.text = "Step %d/%d: %s (%d%%)" % [sim_step_idx + 1, sim_sequence.size(), step.type, min(pct, 100)]
 
 	# 1. Propeller Spin — use bridge RPMs if available
 	if sim_state == "playing":
 		var bridge_rpms = []
 		if _bridge_active():
 			bridge_rpms = bridge.get_motor_rpms()
-		var prop_idx := 0
-		for comp in placed:
-			if is_instance_valid(comp.get("node")) and comp.type == "Propeller":
-				for ch in comp.node.get_children():
-					if is_instance_valid(ch) and ch.name == "prop_blade":
-						var spin_speed := 35.0
-						if prop_idx < bridge_rpms.size() and bridge_rpms[prop_idx] > 0:
-							spin_speed = bridge_rpms[prop_idx] / 150.0  # Increased multiplier for realism
-						ch.rotation.y += delta * spin_speed
-						prop_idx += 1
+		if _simulation_coordinator_service != null:
+			_simulation_coordinator_service.spin_propellers({
+				"delta": delta,
+				"placed": placed,
+				"bridge_rpms": bridge_rpms,
+			})
+		else:
+			var prop_idx := 0
+			for comp in placed:
+				if is_instance_valid(comp.get("node")) and comp.type == "Propeller":
+					for ch in comp.node.get_children():
+						if is_instance_valid(ch) and ch.name == "prop_blade":
+							var spin_speed := 35.0
+							if prop_idx < bridge_rpms.size() and bridge_rpms[prop_idx] > 0:
+								spin_speed = bridge_rpms[prop_idx] / 150.0  # Increased multiplier for realism
+							ch.rotation.y += delta * spin_speed
+							prop_idx += 1
 
-	if check.capability == "Cannot fly" and not _bridge_active():
+	if _simulation_coordinator_service != null:
+		var settle = _simulation_coordinator_service.settle_cannot_fly({
+			"capability": str(check.get("capability", "")),
+			"bridge_active": _bridge_active(),
+			"current_pos": components_group.position,
+		})
+		if bool(settle.get("handled", false)):
+			components_group.position = settle.get("position", components_group.position)
+			_update_swarm_and_telemetry(delta)
+			return
+	elif check.capability == "Cannot fly" and not _bridge_active():
 		components_group.position.y = lerp(components_group.position.y, 0.0, 0.08)
 		_update_swarm_and_telemetry(delta)
 		return
 
 	# ── BRIDGE PHYSICS MODE ──
 	if _bridge_active() and use_bridge_physics:
-		if bool(_safety_state.get("active", false)) and str(_safety_state.get("mode", "none")) == "land":
+		if (_simulation_coordinator_service != null and _simulation_coordinator_service.should_force_bridge_land(_safety_state)) or (bool(_safety_state.get("active", false)) and str(_safety_state.get("mode", "none")) == "land"):
 			bridge.cmd_land()
 		_simulate_bridge(delta)
 		_update_swarm_and_telemetry(delta)

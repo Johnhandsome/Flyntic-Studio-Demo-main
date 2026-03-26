@@ -20,6 +20,8 @@ This file tracks decomposition of `Godot/Main.gd` into focused services.
   - Responsibility: sensor sampling, swarm update dispatch, telemetry record step.
 - [x] `Godot/services/RuntimeInputService.gd`
   - Responsibility: hotkey-to-action routing for runtime input shortcuts.
+- [x] `Godot/services/SimulationCoordinatorService.gd`
+  - Responsibility: replay handling, safety mediation, simulation step label orchestration.
 
 ## Folder Cleanup
 
@@ -36,6 +38,8 @@ This file tracks decomposition of `Godot/Main.gd` into focused services.
 
 - [ ] SimulationCoordinator
   - Move `_simulate`, bridge/kinematic routing, and step orchestration.
+  - Status: replay/safety/step-label + prop-spin + cannot-fly settle + bridge-land decision moved.
+  - Remaining: bridge/kinematic top-level routing and broader simulation state transitions.
 - [ ] RuntimeInputController
   - Keep reducing direct input logic in `_input` (mouse/canvas branches remain).
 - [ ] DiagnosticsService
