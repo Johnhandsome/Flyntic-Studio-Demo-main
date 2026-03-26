@@ -35,6 +35,8 @@ This backlog is ordered by business impact and release risk.
 - [x] Add mission planner for autonomous workflows.
 - [x] Add sensor-model plugins (GPS/IMU/barometer/vision) with profile-gated fidelity.
 - [x] Add geofence + failsafe safety layer (RTL and emergency land) for autonomous runs.
+- [x] Add telemetry session manifest (seed/profile metadata) for deterministic replay context.
+- [x] Add telemetry quality validator (row/monotonic/outlier checks).
 
 ## Suggested Sprint Mapping
 
@@ -71,3 +73,4 @@ This backlog is ordered by business impact and release risk.
 - [x] Mission planner MVP
 - [x] Sensor model plugin integration
 - [x] Safety layer (geofence/failsafe) integration
+- [x] Telemetry manifest + quality validator integration

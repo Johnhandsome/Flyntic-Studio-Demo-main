@@ -17,6 +17,8 @@ This roadmap consolidates productization and architecture planning with focus on
 - Sensor model plugin integrated: GPS/IMU/barometer synthetic sampling with EMI-influenced noise.
 - Replay runner integrated: deterministic replay from recorded telemetry CSV sessions.
 - Safety layer integrated: geofence monitoring with failsafe RTL/emergency land modes.
+- Telemetry manifest integrated: session metadata includes seed/profile for reproducibility context.
+- Telemetry validator integrated: in-app data quality checks for monotonicity/parse/outlier signals.
 - Analytics instrumentation and in-app metrics summary available.
 - Save/load schema versioning, autosave, recovery flow already in place.
 

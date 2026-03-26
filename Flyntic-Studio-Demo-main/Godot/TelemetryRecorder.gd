@@ -4,25 +4,34 @@ var _dir := "user://telemetry"
 var _session_id := ""
 var _jsonl_path := ""
 var _csv_path := ""
+var _manifest_path := ""
 var _active := false
 
 func initialize(output_dir: String):
 	_dir = output_dir
 	DirAccess.make_dir_recursive_absolute(_dir)
 
-func start_session(prefix := "sim") -> Dictionary:
+func start_session(prefix := "sim", metadata: Dictionary = {}) -> Dictionary:
 	if _active:
 		stop_session()
 	_session_id = "%s_%s" % [prefix, Time.get_datetime_string_from_system().replace(":", "-").replace(" ", "_")]
 	_jsonl_path = _dir + "/" + _session_id + ".jsonl"
 	_csv_path = _dir + "/" + _session_id + ".csv"
+	_manifest_path = _dir + "/" + _session_id + ".manifest.json"
 	var csv = FileAccess.open(_csv_path, FileAccess.WRITE)
 	if csv == null:
 		return {"ok": false}
 	csv.store_line("ts,sim_time,x,y,z,vx,vy,vz,ax,ay,az,wind_x,wind_y,wind_z,emi_x,emi_y,emi_z,luminance,swarm_count")
 	csv.close()
+	_write_manifest(metadata)
 	_active = true
-	return {"ok": true, "session_id": _session_id, "jsonl": _jsonl_path, "csv": _csv_path}
+	return {
+		"ok": true,
+		"session_id": _session_id,
+		"jsonl": _jsonl_path,
+		"csv": _csv_path,
+		"manifest": _manifest_path,
+	}
 
 func stop_session():
 	_active = false
@@ -60,3 +69,18 @@ func record(sample: Dictionary):
 		]
 		cf.store_line(line)
 		cf.close()
+
+func _write_manifest(metadata: Dictionary):
+	var mf = FileAccess.open(_manifest_path, FileAccess.WRITE)
+	if mf == null:
+		return
+	var doc = {
+		"schema": 1,
+		"session_id": _session_id,
+		"created_at": Time.get_unix_time_from_system(),
+		"csv": _csv_path,
+		"jsonl": _jsonl_path,
+		"metadata": metadata,
+	}
+	mf.store_string(JSON.stringify(doc, "\t"))
+	mf.close()

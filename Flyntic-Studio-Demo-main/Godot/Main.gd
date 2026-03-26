@@ -414,6 +414,7 @@ var _analytics_service: RefCounted = null
 var _environment_service: RefCounted = null
 var _swarm_controller: RefCounted = null
 var _telemetry_recorder: RefCounted = null
+var _telemetry_validator: RefCounted = null
 var _mission_planner: RefCounted = null
 var _sensor_model: RefCounted = null
 var _replay_runner: RefCounted = null
@@ -427,6 +428,7 @@ var _telemetry_sample_rate := 12.0
 var _mission_active := false
 var _replay_active := false
 var _last_telemetry_csv := ""
+var _last_telemetry_manifest := ""
 var _estimated_flight_minutes := 0.0
 var _prev_leader_pos := Vector3.ZERO
 var _prev_leader_vel := Vector3.ZERO
@@ -669,6 +671,11 @@ func _init_telemetry():
 		return
 	_telemetry_recorder = telemetry_script.new()
 	_telemetry_recorder.initialize(TELEMETRY_DIR)
+	var validator_script = load("res://TelemetryDataValidator.gd")
+	if validator_script != null:
+		_telemetry_validator = validator_script.new()
+	else:
+		_log("Telemetry validator module missing", "warning")
 
 func _toggle_swarm():
 	if _swarm_controller == null:
@@ -696,9 +703,10 @@ func _toggle_telemetry_recording():
 		_log("Telemetry recording stopped", "info")
 		_track_event("telemetry_stopped")
 		return
-	var start_result = _telemetry_recorder.start_session("drone")
+	var start_result = _telemetry_recorder.start_session("drone", _build_telemetry_session_metadata())
 	if bool(start_result.get("ok", false)):
 		_last_telemetry_csv = str(start_result.get("csv", ""))
+		_last_telemetry_manifest = str(start_result.get("manifest", ""))
 		_log("Telemetry recording started", "success")
 		_track_event("telemetry_started", {"session": str(start_result.get("session_id", ""))})
 	else:
@@ -743,8 +751,56 @@ func _toggle_replay_mode():
 	_mission_active = false
 	if _mission_planner != null:
 		_mission_planner.stop()
+	var manifest = load_result.get("manifest", {})
+	if typeof(manifest) == TYPE_DICTIONARY and not manifest.is_empty():
+		var metadata = manifest.get("metadata", {})
+		var seed = "n/a"
+		if typeof(metadata) == TYPE_DICTIONARY:
+			seed = str(metadata.get("seed", "n/a"))
+		_log("Replay metadata: seed=%s" % seed, "info")
 	_log("Replay mode enabled (%d samples)" % int(load_result.get("count", 0)), "success")
 	_track_event("replay_enabled", {"count": int(load_result.get("count", 0))})
+
+func _validate_latest_telemetry():
+	if _telemetry_validator == null:
+		_log("Telemetry validator unavailable", "warning")
+		return
+	if _last_telemetry_csv == "":
+		_log("No telemetry CSV available to validate", "warning")
+		return
+	var result = _telemetry_validator.validate_csv(_last_telemetry_csv)
+	if not bool(result.get("ok", false)):
+		_log("Telemetry validation failed: %s" % str(result.get("reason", "unknown")), "error")
+		return
+	var score = float(result.get("quality_score", 0.0))
+	_log("Telemetry quality score: %.1f" % score, "info")
+	_log(
+		"Rows=%d, parse=%d, monotonic=%d, outliers=%d" % [
+			int(result.get("rows", 0)),
+			int(result.get("parse_errors", 0)),
+			int(result.get("monotonic_errors", 0)),
+			int(result.get("outlier_rows", 0)),
+		],
+		"info"
+	)
+	_track_event("telemetry_validated", {
+		"score": score,
+		"rows": int(result.get("rows", 0)),
+		"parse_errors": int(result.get("parse_errors", 0)),
+		"monotonic_errors": int(result.get("monotonic_errors", 0)),
+		"outlier_rows": int(result.get("outlier_rows", 0)),
+	})
+
+func _build_telemetry_session_metadata() -> Dictionary:
+	return {
+		"seed": 1337,
+		"low_hardware_mode": _low_hardware_mode,
+		"swarm_enabled": _swarm_enabled,
+		"mission_active": _mission_active,
+		"safety_enabled": _safety_enabled,
+		"sample_rate_hz": _telemetry_sample_rate,
+		"profile": "low_hardware" if _low_hardware_mode else "balanced",
+	}
 
 func _toggle_safety_layer():
 	_safety_enabled = not _safety_enabled
@@ -2038,6 +2094,8 @@ func _input(event):
 			_reset_camera()
 		if event.keycode == KEY_F6:
 			_toggle_telemetry_recording()
+		if event.keycode == KEY_F4:
+			_validate_latest_telemetry()
 		if event.keycode == KEY_F7 and not sim_locked:
 			_toggle_swarm()
 		if event.keycode == KEY_F8:
@@ -2753,9 +2811,10 @@ func _on_play():
 		if _replay_runner != null:
 			_replay_runner.stop()
 	if _telemetry_recorder != null and not _telemetry_recorder.is_active():
-		var start_result = _telemetry_recorder.start_session("drone")
+		var start_result = _telemetry_recorder.start_session("drone", _build_telemetry_session_metadata())
 		if bool(start_result.get("ok", false)):
 			_last_telemetry_csv = str(start_result.get("csv", ""))
+			_last_telemetry_manifest = str(start_result.get("manifest", ""))
 			_track_event("telemetry_started", {"session": str(start_result.get("session_id", "")), "auto": true})
 	
 	# ── PhysicsBridge: Configure and arm ──
