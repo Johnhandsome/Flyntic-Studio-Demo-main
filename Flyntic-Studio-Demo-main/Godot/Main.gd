@@ -1820,8 +1820,10 @@ func _input(event):
 			_redo()
 		# Save/Load
 		if event.ctrl_pressed and event.keycode == KEY_S:
+			_track_event("save_shortcut_used")
 			_save_project()
 		if event.ctrl_pressed and event.keycode == KEY_O:
+			_track_event("load_shortcut_used")
 			_load_project()
 		# Camera shortcuts
 		if event.keycode == KEY_HOME:

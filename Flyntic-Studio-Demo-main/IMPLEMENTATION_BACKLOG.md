@@ -8,7 +8,7 @@ This backlog is ordered by business impact and release risk.
 - [ ] Refactor monolithic `Godot/Main.gd` into focused controllers.
 - [x] Add autosave + crash recovery snapshots.
 - [x] Add schema version + migration for `.flyntic` project files.
-- [ ] Add end-to-end save/load round-trip test cases.
+- [x] Add end-to-end save/load round-trip test cases.
 - [x] Add release smoke test checklist for every build.
 
 ## P1 - Must complete for strong paid value
@@ -36,12 +36,12 @@ This backlog is ordered by business impact and release risk.
 ## Sprint 2 (Week 3-4)
 - [x] Autosave and recovery
 - [x] Preflight diagnostics severity
-- [ ] Save/load regression tests
+- [x] Save/load regression tests
 
 ## Sprint 3 (Week 5-6)
 - [x] Wiring rule engine unification
 - [x] Remediation quick-fix actions
-- [ ] CI quality gates
+- [x] CI quality gates
 
 ## Sprint 4 (Week 7-8)
 - [x] Analytics instrumentation

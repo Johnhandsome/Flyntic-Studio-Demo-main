@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+jobs:
+  quality-and-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Godot
+        uses: firebelley/setup-godot@v1
+        with:
+          version: 4.2.2
+          use-dotnet: false
+
+      - name: Quality gates
+        shell: pwsh
+        run: ./scripts/quality_gate.ps1
+
+      - name: Run persistence tests
+        run: godot --headless --path Godot --script tests/run_tests.gd
