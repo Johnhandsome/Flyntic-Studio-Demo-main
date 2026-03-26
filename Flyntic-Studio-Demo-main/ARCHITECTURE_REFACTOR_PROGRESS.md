@@ -38,8 +38,8 @@ This file tracks decomposition of `Godot/Main.gd` into focused services.
 
 - [ ] SimulationCoordinator
   - Move `_simulate`, bridge/kinematic routing, and step orchestration.
-  - Status: replay/safety/step-label + prop-spin + cannot-fly settle + bridge-land decision moved.
-  - Remaining: bridge/kinematic top-level routing and broader simulation state transitions.
+  - Status: replay/safety/step-label + prop-spin + cannot-fly settle + bridge-land decision + bridge/kinematic top-level routing + bridge step-start command dispatch moved.
+  - Remaining: broader simulation state transitions and deeper step orchestration extraction.
 - [ ] RuntimeInputController
   - Keep reducing direct input logic in `_input` (mouse/canvas branches remain).
 - [ ] DiagnosticsService

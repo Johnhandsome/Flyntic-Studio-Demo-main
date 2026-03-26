@@ -3159,15 +3159,29 @@ func _simulate(delta: float):
 							prop_idx += 1
 
 	if _simulation_coordinator_service != null:
-		var settle = _simulation_coordinator_service.settle_cannot_fly({
+		var route = _simulation_coordinator_service.decide_simulation_path({
 			"capability": str(check.get("capability", "")),
 			"bridge_active": _bridge_active(),
+			"use_bridge_physics": use_bridge_physics,
 			"current_pos": components_group.position,
+			"safety_state": _safety_state,
 		})
-		if bool(settle.get("handled", false)):
-			components_group.position = settle.get("position", components_group.position)
+		var route_mode = str(route.get("mode", "kinematic"))
+		if route_mode == "settle":
+			components_group.position = route.get("position", components_group.position)
 			_update_swarm_and_telemetry(delta)
 			return
+		if route_mode == "bridge":
+			if bool(route.get("force_land", false)):
+				bridge.cmd_land()
+			_simulate_bridge(delta)
+			_update_swarm_and_telemetry(delta)
+			_update_diagnostics()  # Live diagnostics during sim
+			return
+		_simulate_kinematic(delta, check)
+		_update_swarm_and_telemetry(delta)
+		_update_diagnostics()  # Live diagnostics during sim
+		return
 	elif check.capability == "Cannot fly" and not _bridge_active():
 		components_group.position.y = lerp(components_group.position.y, 0.0, 0.08)
 		_update_swarm_and_telemetry(delta)
@@ -3175,7 +3189,7 @@ func _simulate(delta: float):
 
 	# ── BRIDGE PHYSICS MODE ──
 	if _bridge_active() and use_bridge_physics:
-		if (_simulation_coordinator_service != null and _simulation_coordinator_service.should_force_bridge_land(_safety_state)) or (bool(_safety_state.get("active", false)) and str(_safety_state.get("mode", "none")) == "land"):
+		if bool(_safety_state.get("active", false)) and str(_safety_state.get("mode", "none")) == "land":
 			bridge.cmd_land()
 		_simulate_bridge(delta)
 		_update_swarm_and_telemetry(delta)
@@ -3200,22 +3214,46 @@ func _simulate_bridge(delta: float):
 		
 		# Send bridge commands only when step starts or changes
 		if sim_step_timer <= delta * 2:  # First frame of step
-			match step.type:
-				"take_off":
-					bridge.cmd_takeoff(2.5)
-					_log("Bridge → Takeoff to 2.5m", "info")
-				"forward":
-					var speed = step.value * 0.05 / step.duration
-					var fwd = -components_group.global_transform.basis.z.normalized()
-					fwd.y = 0; fwd = fwd.normalized()
-					bridge.cmd_move(fwd.x * speed, 0.0, fwd.z * speed)
-					_log("Bridge → Move forward %.1f cm (%.2f m/s)" % [step.value, speed], "info")
-				"hover":
-					bridge.cmd_hover()
-					_log("Bridge → Hover", "info")
-				"land":
-					bridge.cmd_land()
-					_log("Bridge → Land", "info")
+			if _simulation_coordinator_service != null:
+				var action = _simulation_coordinator_service.build_bridge_step_start_action({
+					"sim_step_timer": sim_step_timer,
+					"delta": delta,
+					"step_type": str(step.type),
+					"step_value": float(step.value),
+					"step_duration": float(step.duration),
+					"forward_basis_z": components_group.global_transform.basis.z,
+				})
+				if bool(action.get("has_action", false)):
+					var cmd = str(action.get("command", ""))
+					match cmd:
+						"takeoff":
+							bridge.cmd_takeoff(float(action.get("height", 2.5)))
+						"move":
+							bridge.cmd_move(float(action.get("vx", 0.0)), float(action.get("vy", 0.0)), float(action.get("vz", 0.0)))
+						"hover":
+							bridge.cmd_hover()
+						"land":
+							bridge.cmd_land()
+					var log_line = str(action.get("log", ""))
+					if log_line != "":
+						_log(log_line, "info")
+			else:
+				match step.type:
+					"take_off":
+						bridge.cmd_takeoff(2.5)
+						_log("Bridge → Takeoff to 2.5m", "info")
+					"forward":
+						var speed = step.value * 0.05 / step.duration
+						var fwd = -components_group.global_transform.basis.z.normalized()
+						fwd.y = 0; fwd = fwd.normalized()
+						bridge.cmd_move(fwd.x * speed, 0.0, fwd.z * speed)
+						_log("Bridge → Move forward %.1f cm (%.2f m/s)" % [step.value, speed], "info")
+					"hover":
+						bridge.cmd_hover()
+						_log("Bridge → Hover", "info")
+					"land":
+						bridge.cmd_land()
+						_log("Bridge → Land", "info")
 
 		if sim_step_timer >= step.duration:
 			sim_step_idx += 1

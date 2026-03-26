@@ -105,3 +105,82 @@ func settle_cannot_fly(payload: Dictionary) -> Dictionary:
 
 func should_force_bridge_land(safety_state: Dictionary) -> bool:
 	return bool(safety_state.get("active", false)) and str(safety_state.get("mode", "none")) == "land"
+
+func decide_simulation_path(payload: Dictionary) -> Dictionary:
+	var capability = str(payload.get("capability", ""))
+	var bridge_active = bool(payload.get("bridge_active", false))
+	var use_bridge_physics = bool(payload.get("use_bridge_physics", false))
+	var current_pos: Vector3 = payload.get("current_pos", Vector3.ZERO)
+	var safety_state: Dictionary = payload.get("safety_state", {})
+
+	var settle = settle_cannot_fly({
+		"capability": capability,
+		"bridge_active": bridge_active,
+		"current_pos": current_pos,
+	})
+	if bool(settle.get("handled", false)):
+		return {
+			"mode": "settle",
+			"position": settle.get("position", current_pos),
+			"force_land": false,
+		}
+
+	if bridge_active and use_bridge_physics:
+		return {
+			"mode": "bridge",
+			"position": current_pos,
+			"force_land": should_force_bridge_land(safety_state),
+		}
+
+	return {
+		"mode": "kinematic",
+		"position": current_pos,
+		"force_land": false,
+	}
+
+func build_bridge_step_start_action(payload: Dictionary) -> Dictionary:
+	var sim_step_timer = float(payload.get("sim_step_timer", 0.0))
+	var delta = float(payload.get("delta", 0.0))
+	if sim_step_timer > delta * 2.0:
+		return {"has_action": false}
+
+	var step_type = str(payload.get("step_type", ""))
+	var step_value = float(payload.get("step_value", 0.0))
+	var step_duration = float(payload.get("step_duration", 0.01))
+	var forward_basis_z: Vector3 = payload.get("forward_basis_z", Vector3.FORWARD)
+
+	match step_type:
+		"take_off":
+			return {
+				"has_action": true,
+				"command": "takeoff",
+				"height": 2.5,
+				"log": "Bridge → Takeoff to 2.5m",
+			}
+		"forward":
+			var speed = step_value * 0.05 / max(step_duration, 0.01)
+			var fwd = -forward_basis_z.normalized()
+			fwd.y = 0.0
+			fwd = fwd.normalized()
+			return {
+				"has_action": true,
+				"command": "move",
+				"vx": fwd.x * speed,
+				"vy": 0.0,
+				"vz": fwd.z * speed,
+				"log": "Bridge → Move forward %.1f cm (%.2f m/s)" % [step_value, speed],
+			}
+		"hover":
+			return {
+				"has_action": true,
+				"command": "hover",
+				"log": "Bridge → Hover",
+			}
+		"land":
+			return {
+				"has_action": true,
+				"command": "land",
+				"log": "Bridge → Land",
+			}
+
+	return {"has_action": false}
