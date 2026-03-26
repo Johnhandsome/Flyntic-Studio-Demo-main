@@ -107,5 +107,5 @@ This roadmap consolidates productization and architecture planning with focus on
 ## Repo Operating Rules
 
 - Keep backlog execution in `IMPLEMENTATION_BACKLOG.md`.
-- Keep release gates in `RELEASE_SMOKE_CHECKLIST.md` and `RC_ROLLBACK_PLAYBOOK.md`.
+- Keep release gates in `docs/release/RELEASE_SMOKE_CHECKLIST.md` and `docs/release/RC_ROLLBACK_PLAYBOOK.md`.
 - Keep this roadmap as the single strategic source for autonomous/swarm/data direction.

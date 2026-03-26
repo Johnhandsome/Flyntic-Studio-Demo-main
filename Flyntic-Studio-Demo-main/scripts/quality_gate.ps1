@@ -2,20 +2,23 @@ $ErrorActionPreference = "Stop"
 
 Write-Host "[QG] Starting quality gates..."
 
+$repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+
 $requiredFiles = @(
     "IMPLEMENTATION_BACKLOG.md",
-    "RELEASE_SMOKE_CHECKLIST.md",
-    "RC_ROLLBACK_PLAYBOOK.md",
+    "docs/release/RELEASE_SMOKE_CHECKLIST.md",
+    "docs/release/RC_ROLLBACK_PLAYBOOK.md",
     "Godot/tests/run_tests.gd"
 )
 
 foreach ($f in $requiredFiles) {
-    if (-not (Test-Path $f)) {
+    $fullPath = Join-Path $repoRoot $f
+    if (-not (Test-Path $fullPath)) {
         throw "[QG] Missing required file: $f"
     }
 }
 
-$backlog = Get-Content "IMPLEMENTATION_BACKLOG.md" -Raw
+$backlog = Get-Content (Join-Path $repoRoot "IMPLEMENTATION_BACKLOG.md") -Raw
 $mustHave = @(
     "Add end-to-end save/load round-trip test cases.",
     "CI quality gates"

@@ -17,9 +17,11 @@ Flyntic Studio is a Godot-based drone assembly and simulation demo. It provides 
 ## Project Structure
 - `Godot/`: Main Godot project, scripts, scenes, and assets.
 - `Godot/services/`: Extracted runtime services (input, telemetry, mission, assist, analytics, safety).
-- `TODO_GODOT.md`: Functional TODO list focused on Godot scope.
 - `IMPLEMENTATION_BACKLOG.md`: Prioritized sprint-ready backlog.
 - `ROADMAP_AUTONOMOUS_DRONE.md`: Unified roadmap for realistic physics, swarm, and autonomous data platform.
+- `docs/release/`: Release checklist and rollback playbook.
+- `docs/architecture/`: Refactor and architecture progress tracking.
+- `docs/archive/`: Legacy or scoped TODO notes.
 
 ## Runtime Controls
 - `F2`: Cycle swarm behavior preset.
