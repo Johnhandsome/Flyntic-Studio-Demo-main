@@ -13,6 +13,10 @@ This roadmap consolidates productization and architecture planning with focus on
 - Environment module integrated: wind, drag approximation, EMI noise, dynamic luminance.
 - Swarm module integrated: follower drones with lightweight formation behavior.
 - Telemetry recorder integrated: JSONL + CSV session capture.
+- Mission planner MVP integrated: waypoint-based autonomous target generation.
+- Sensor model plugin integrated: GPS/IMU/barometer synthetic sampling with EMI-influenced noise.
+- Replay runner integrated: deterministic replay from recorded telemetry CSV sessions.
+- Safety layer integrated: geofence monitoring with failsafe RTL/emergency land modes.
 - Analytics instrumentation and in-app metrics summary available.
 - Save/load schema versioning, autosave, recovery flow already in place.
 

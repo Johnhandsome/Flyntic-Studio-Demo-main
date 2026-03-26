@@ -18,10 +18,13 @@ Flyntic Studio is a Godot-based drone assembly and simulation demo. It provides 
 - `ROADMAP_AUTONOMOUS_DRONE.md`: Unified roadmap for realistic physics, swarm, and autonomous data platform.
 
 ## Runtime Controls
+- `F5`: Toggle safety layer (geofence + failsafe RTL/land).
 - `F6`: Toggle telemetry recording session.
 - `F7`: Toggle swarm follower drones.
 - `F8`: Toggle low-hardware mode.
 - `F9`: Guided remediation for common wiring issues.
+- `F10`: Toggle autonomous mission planner.
+- `F12`: Toggle deterministic replay mode from latest telemetry CSV.
 
 ## Getting Started
 1. **Clone the repository:**

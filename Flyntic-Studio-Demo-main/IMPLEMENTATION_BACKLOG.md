@@ -31,9 +31,10 @@ This backlog is ordered by business impact and release risk.
 - [x] Add modular environment physics (wind/EMI/light) with low-hardware profile.
 - [x] Add baseline swarm drone controller.
 - [x] Add physics telemetry recorder (JSONL/CSV sessions).
-- [ ] Add deterministic replay runner from telemetry + seed.
-- [ ] Add mission planner for autonomous workflows.
-- [ ] Add sensor-model plugins (GPS/IMU/barometer/vision) with profile-gated fidelity.
+- [x] Add deterministic replay runner from telemetry + seed.
+- [x] Add mission planner for autonomous workflows.
+- [x] Add sensor-model plugins (GPS/IMU/barometer/vision) with profile-gated fidelity.
+- [x] Add geofence + failsafe safety layer (RTL and emergency land) for autonomous runs.
 
 ## Suggested Sprint Mapping
 
@@ -66,5 +67,7 @@ This backlog is ordered by business impact and release risk.
 - [x] Environment module integration
 - [x] Swarm baseline integration
 - [x] Telemetry recorder integration
-- [ ] Deterministic replay tool
-- [ ] Mission planner MVP
+- [x] Deterministic replay tool
+- [x] Mission planner MVP
+- [x] Sensor model plugin integration
+- [x] Safety layer (geofence/failsafe) integration

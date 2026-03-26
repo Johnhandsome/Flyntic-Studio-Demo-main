@@ -414,18 +414,40 @@ var _analytics_service: RefCounted = null
 var _environment_service: RefCounted = null
 var _swarm_controller: RefCounted = null
 var _telemetry_recorder: RefCounted = null
+var _mission_planner: RefCounted = null
+var _sensor_model: RefCounted = null
+var _replay_runner: RefCounted = null
+var _safety_layer: RefCounted = null
 var _swarm_enabled := false
 var _swarm_count := 0
 var _low_hardware_mode := true
+var _safety_enabled := true
 var _telemetry_sample_timer := 0.0
 var _telemetry_sample_rate := 12.0
+var _mission_active := false
+var _replay_active := false
+var _last_telemetry_csv := ""
+var _estimated_flight_minutes := 0.0
 var _prev_leader_pos := Vector3.ZERO
 var _prev_leader_vel := Vector3.ZERO
+var _sensor_state := {
+	"gps_pos": Vector3.ZERO,
+	"imu_vel": Vector3.ZERO,
+	"imu_accel": Vector3.ZERO,
+	"baro_alt": 0.0,
+	"health": 1.0,
+}
 var _env_state := {
 	"wind": Vector3.ZERO,
 	"drag": Vector3.ZERO,
 	"emi": Vector3.ZERO,
 	"luminance": 1.0,
+}
+var _safety_state := {
+	"active": false,
+	"mode": "none",
+	"reason": "",
+	"target": Vector3.ZERO,
 }
 func _maybe_prompt_restore_autosave():
 	if _autosave_restore_prompted:
@@ -608,6 +630,38 @@ func _init_environment_modules():
 	else:
 		_log("Swarm module missing", "warning")
 
+	var mission_script = load("res://MissionPlanner.gd")
+	if mission_script != null:
+		_mission_planner = mission_script.new()
+		_mission_planner.configure({"arrival_radius": 0.8, "cruise_speed": 2.8})
+	else:
+		_log("Mission planner module missing", "warning")
+
+	var sensor_script = load("res://SensorModelService.gd")
+	if sensor_script != null:
+		_sensor_model = sensor_script.new()
+		_sensor_model.configure({"seed": 1337})
+	else:
+		_log("Sensor model module missing", "warning")
+
+	var replay_script = load("res://ReplayRunner.gd")
+	if replay_script != null:
+		_replay_runner = replay_script.new()
+	else:
+		_log("Replay runner module missing", "warning")
+
+	var safety_script = load("res://SafetyLayer.gd")
+	if safety_script != null:
+		_safety_layer = safety_script.new()
+		_safety_layer.configure({
+			"enabled": _safety_enabled,
+			"geofence_radius": 14.0,
+			"rtl_altitude": 2.8,
+			"battery_rtl_threshold": 0.18,
+		})
+	else:
+		_log("Safety layer module missing", "warning")
+
 func _init_telemetry():
 	var telemetry_script = load("res://TelemetryRecorder.gd")
 	if telemetry_script == null:
@@ -644,10 +698,67 @@ func _toggle_telemetry_recording():
 		return
 	var start_result = _telemetry_recorder.start_session("drone")
 	if bool(start_result.get("ok", false)):
+		_last_telemetry_csv = str(start_result.get("csv", ""))
 		_log("Telemetry recording started", "success")
 		_track_event("telemetry_started", {"session": str(start_result.get("session_id", ""))})
 	else:
 		_log("Telemetry recording failed to start", "error")
+
+func _toggle_autonomous_mission():
+	if _mission_planner == null:
+		_log("Mission planner unavailable", "warning")
+		return
+	if _mission_active:
+		_mission_planner.stop()
+		_mission_active = false
+		_log("Autonomous mission disabled", "info")
+		_track_event("mission_disabled")
+		return
+	_mission_planner.load_default_mission(components_group.global_position)
+	_mission_planner.start()
+	_mission_active = true
+	_log("Autonomous mission enabled (%d waypoints)" % _mission_planner.waypoint_count(), "success")
+	_track_event("mission_enabled", {"waypoints": _mission_planner.waypoint_count()})
+
+func _toggle_replay_mode():
+	if _replay_runner == null:
+		_log("Replay runner unavailable", "warning")
+		return
+	if _replay_active:
+		_replay_runner.stop()
+		_replay_active = false
+		_log("Replay mode disabled", "info")
+		_track_event("replay_disabled")
+		return
+	if _last_telemetry_csv == "":
+		_log("No telemetry session available for replay", "warning")
+		return
+	var load_result = _replay_runner.load_csv(_last_telemetry_csv)
+	if not bool(load_result.get("ok", false)):
+		_log("Replay load failed", "error")
+		_track_event("replay_load_failed", {"reason": str(load_result.get("reason", "unknown"))})
+		return
+	_replay_runner.start()
+	_replay_active = true
+	_mission_active = false
+	if _mission_planner != null:
+		_mission_planner.stop()
+	_log("Replay mode enabled (%d samples)" % int(load_result.get("count", 0)), "success")
+	_track_event("replay_enabled", {"count": int(load_result.get("count", 0))})
+
+func _toggle_safety_layer():
+	_safety_enabled = not _safety_enabled
+	if _safety_layer != null:
+		_safety_layer.set_enabled(_safety_enabled)
+	if not _safety_enabled:
+		_safety_state = {
+			"active": false,
+			"mode": "none",
+			"reason": "disabled",
+			"target": components_group.global_position,
+		}
+	_log("Safety layer: " + ("ON" if _safety_enabled else "OFF"), "info")
+	_track_event("safety_toggled", {"enabled": _safety_enabled})
 
 func _setup_topbar_menu_actions():
 	if not is_instance_valid(topbar_menus):
@@ -727,23 +838,27 @@ func _sample_environment(delta: float):
 
 func _update_swarm_and_telemetry(delta: float):
 	var leader_vel = (components_group.global_position - _prev_leader_pos) / max(delta, 0.0001)
+	var accel = (leader_vel - _prev_leader_vel) / max(delta, 0.0001)
+	if _sensor_model != null:
+		_sensor_state = _sensor_model.sample(sim_time, components_group.global_position, leader_vel, accel, _env_state.get("emi", Vector3.ZERO))
 	if _swarm_enabled and _swarm_controller != null:
 		_swarm_controller.update_followers(delta, components_group.global_position, leader_vel, _env_state.get("wind", Vector3.ZERO))
 
 	_telemetry_sample_timer += delta
 	if _telemetry_recorder != null and _telemetry_recorder.is_active() and _telemetry_sample_timer >= (1.0 / max(_telemetry_sample_rate, 1.0)):
 		_telemetry_sample_timer = 0.0
-		var accel = (leader_vel - _prev_leader_vel) / max(delta, 0.0001)
 		_telemetry_recorder.record({
 			"ts": Time.get_unix_time_from_system(),
 			"sim_time": sim_time,
 			"position": components_group.global_position,
 			"velocity": leader_vel,
 			"acceleration": accel,
+			"sensor": _sensor_state,
 			"wind": _env_state.get("wind", Vector3.ZERO),
 			"emi": _env_state.get("emi", Vector3.ZERO),
 			"luminance": float(_env_state.get("luminance", 1.0)),
 			"swarm_count": _swarm_controller.follower_count() if _swarm_controller != null else 0,
+			"safety": _safety_state,
 		})
 
 	_prev_leader_pos = components_group.global_position
@@ -1930,6 +2045,12 @@ func _input(event):
 			if _environment_service != null:
 				_environment_service.configure({"low_hardware_mode": _low_hardware_mode})
 			_log("Low hardware mode: " + ("ON" if _low_hardware_mode else "OFF"), "info")
+		if event.keycode == KEY_F5:
+			_toggle_safety_layer()
+		if event.keycode == KEY_F10 and not sim_locked:
+			_toggle_autonomous_mission()
+		if event.keycode == KEY_F12 and not sim_locked:
+			_toggle_replay_mode()
 		if event.keycode == KEY_F9 and not sim_locked:
 			_run_guided_remediation()
 		if event.keycode == KEY_F and not sim_locked:
@@ -2613,13 +2734,28 @@ func _on_play():
 	sim_step_timer = 0.0
 	sim_target_pos = Vector3.ZERO
 	sim_target_rot = Vector3.ZERO
+	_estimated_flight_minutes = _estimate_flight_minutes()
 	sim_label.text = "Step 1/" + str(sim_sequence.size()) + ": " + sim_sequence[0].type
 	topbar_status.text = "playing"
 	_prev_leader_pos = components_group.global_position
 	_prev_leader_vel = Vector3.ZERO
+	if _safety_layer != null:
+		_safety_layer.arm(components_group.global_position)
+		_safety_layer.set_enabled(_safety_enabled)
+	_safety_state = {
+		"active": false,
+		"mode": "none",
+		"reason": "",
+		"target": components_group.global_position,
+	}
+	if _replay_active:
+		_replay_active = false
+		if _replay_runner != null:
+			_replay_runner.stop()
 	if _telemetry_recorder != null and not _telemetry_recorder.is_active():
 		var start_result = _telemetry_recorder.start_session("drone")
 		if bool(start_result.get("ok", false)):
+			_last_telemetry_csv = str(start_result.get("csv", ""))
 			_track_event("telemetry_started", {"session": str(start_result.get("session_id", "")), "auto": true})
 	
 	# ── PhysicsBridge: Configure and arm ──
@@ -2717,14 +2853,61 @@ func _on_stop():
 	if _telemetry_recorder != null and _telemetry_recorder.is_active():
 		_telemetry_recorder.stop_session()
 		_track_event("telemetry_stopped", {"auto": true})
+	if _mission_planner != null:
+		_mission_planner.stop()
+	_mission_active = false
+	if _safety_layer != null:
+		_safety_layer.disarm()
+	_safety_state = {
+		"active": false,
+		"mode": "none",
+		"reason": "",
+		"target": components_group.global_position,
+	}
 	
 	# Unlock UI (all modes)
 	_set_ui_locked(false)
 
 func _simulate(delta: float):
 	sim_time += delta
+	if _replay_active and _replay_runner != null:
+		var replay = _replay_runner.sample(sim_time)
+		if bool(replay.get("ok", false)):
+			var row: Dictionary = replay.get("row", {})
+			components_group.global_position = row.get("position", components_group.global_position)
+			var rv: Vector3 = row.get("velocity", Vector3.ZERO)
+			if rv.length() > 0.01:
+				components_group.look_at(components_group.global_position + rv.normalized(), Vector3.UP)
+		if bool(replay.get("done", false)):
+			_replay_active = false
+			_track_event("replay_completed")
+		_update_swarm_and_telemetry(delta)
+		_update_diagnostics()
+		return
 	_sample_environment(delta)
 	var check = _preflight_check()
+	if _safety_layer != null:
+		var battery_ratio = _estimate_remaining_battery_ratio(sim_time)
+		var sensor_health = float(_sensor_state.get("health", 1.0))
+		var previous_active = bool(_safety_state.get("active", false))
+		_safety_state = _safety_layer.update(
+			delta,
+			components_group.global_position,
+			sim_target_pos,
+			battery_ratio,
+			sensor_health
+		)
+		if bool(_safety_state.get("active", false)):
+			sim_target_pos = _safety_state.get("target", sim_target_pos)
+			if _mission_active and _mission_planner != null:
+				_mission_planner.stop()
+				_mission_active = false
+			if not previous_active:
+				_log("Safety trigger: %s" % str(_safety_state.get("reason", "unknown")), "warning")
+				_track_event("safety_triggered", {
+					"mode": str(_safety_state.get("mode", "none")),
+					"reason": str(_safety_state.get("reason", "unknown")),
+				})
 	
 	# Live step progress indicator
 	if sim_step_idx < sim_sequence.size():
@@ -2755,6 +2938,8 @@ func _simulate(delta: float):
 
 	# ── BRIDGE PHYSICS MODE ──
 	if _bridge_active() and use_bridge_physics:
+		if bool(_safety_state.get("active", false)) and str(_safety_state.get("mode", "none")) == "land":
+			bridge.cmd_land()
 		_simulate_bridge(delta)
 		_update_swarm_and_telemetry(delta)
 		_update_diagnostics()  # Live diagnostics during sim
@@ -2837,6 +3022,17 @@ func _on_bridge_state(state: Dictionary):
 
 func _simulate_kinematic(delta: float, check: Dictionary):
 	"""Original kinematic simulation as fallback when bridge is not connected."""
+	var current_vel = (components_group.global_position - _prev_leader_pos) / max(delta, 0.0001)
+	if _mission_active and _mission_planner != null:
+		var mission = _mission_planner.compute_target(components_group.global_position, current_vel, delta)
+		if bool(mission.get("active", false)):
+			sim_target_pos = mission.get("predicted", sim_target_pos)
+			sim_label.text = "AUTO WP %d/%d" % [_mission_planner.current_index() + 1, _mission_planner.waypoint_count()]
+		elif bool(mission.get("completed", false)):
+			_mission_active = false
+			_log("Autonomous mission completed", "success")
+			_track_event("mission_completed")
+
 	# 2. Logic Step Processing
 	if sim_state == "playing" and sim_step_idx < sim_sequence.size():
 		var step = sim_sequence[sim_step_idx]
@@ -3005,8 +3201,7 @@ func _update_all():
 		cap_val.remove_theme_color_override("font_color")
 
 	bat_val.text = str(bat_cap) + " mAh"
-	var draw_a = tt * 0.001 * 30 # rough amps estimate
-	var ft_min = (bat_cap / 1000.0 * 60.0 / max(draw_a, 1)) if bat_cap > 0 else 0
+	var ft_min = _estimate_flight_minutes()
 	ft_val.text = "%.1f min" % ft_min
 
 	comp_count.text = "  Components: " + str(placed.size())
@@ -3194,8 +3389,47 @@ func _update_diagnostics():
 			"ON" if _low_hardware_mode else "OFF",
 		]
 	))
+	issues.append(_diag_issue(
+		DIAG_SEV_INFO,
+		"Mission=%s, Replay=%s, SensorHealth=%.2f, Safety=%s" % [
+			"ON" if _mission_active else "OFF",
+			"ON" if _replay_active else "OFF",
+			float(_sensor_state.get("health", 1.0)),
+			"ON" if _safety_enabled else "OFF",
+		]
+	))
+	issues.append(_diag_issue(
+		DIAG_SEV_INFO,
+		"Battery %.0f%%, SafetyMode=%s, Reason=%s" % [
+			_estimate_remaining_battery_ratio(sim_time) * 100.0,
+			str(_safety_state.get("mode", "none")).to_upper(),
+			str(_safety_state.get("reason", "")),
+		]
+	))
 
 	diag_text.text = _format_diagnostics(issues)
+
+func _estimate_flight_minutes() -> float:
+	var total_thrust := 0.0
+	var battery_capacity := 0
+	for c in placed:
+		var d = COMPONENTS[c.id]
+		total_thrust += float(d.get("thrust", 0.0))
+		battery_capacity += int(d.get("capacity", 0))
+	if battery_capacity <= 0:
+		return 0.0
+	var draw_a = total_thrust * 0.001 * 30.0
+	if draw_a <= 0.0:
+		return 0.0
+	return (float(battery_capacity) / 1000.0) * 60.0 / draw_a
+
+func _estimate_remaining_battery_ratio(elapsed_sec: float) -> float:
+	var total_minutes = _estimated_flight_minutes
+	if total_minutes <= 0.0:
+		total_minutes = _estimate_flight_minutes()
+	if total_minutes <= 0.0:
+		return 0.0
+	return clamp(1.0 - (elapsed_sec / (total_minutes * 60.0)), 0.0, 1.0)
 
 # ──────────────────────────── UTILS ───────────────────────────────
 func _clear_children(n: Node):
