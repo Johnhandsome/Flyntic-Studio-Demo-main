@@ -397,11 +397,93 @@ const AUTOSAVE_INTERVAL_SEC := 20.0
 const AUTOSAVE_DIR := "user://autosave"
 const AUTOSAVE_LATEST_PATH := "user://autosave/latest.flyntic"
 const AUTOSAVE_MAX_SNAPSHOTS := 5
+const ANALYTICS_DIR := "user://analytics"
+const ANALYTICS_EVENTS_PATH := "user://analytics/events.jsonl"
+const DIAG_SEV_ERROR := "error"
+const DIAG_SEV_WARNING := "warning"
+const DIAG_SEV_INFO := "info"
 
 var _autosave_enabled := true
 var _autosave_timer := 0.0
 var _autosave_last_hash := 0
 var _autosave_bootstrapped := false
+var _autosave_restore_prompted := false
+var _analytics_enabled := true
+func _maybe_prompt_restore_autosave():
+	if _autosave_restore_prompted:
+		return
+	_autosave_restore_prompted = true
+	var cd = ConfirmationDialog.new()
+	cd.title = "Restore Autosave"
+	cd.dialog_text = "A recent autosave was found. Restore it now?"
+	add_child(cd)
+	cd.confirmed.connect(func():
+		var normalized = _read_normalized_project_file(AUTOSAVE_LATEST_PATH)
+		if normalized.is_empty():
+			_log("Autosave restore failed", "error")
+			cd.queue_free()
+			return
+		_apply_loaded_project_data(normalized)
+		_log("Autosave restored", "success")
+		cd.queue_free()
+	)
+	cd.canceled.connect(func(): cd.queue_free())
+	cd.popup_centered(Vector2i(460, 180))
+
+func _read_normalized_project_file(path: String) -> Dictionary:
+	var file = FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		return {}
+	var json_text = file.get_as_text()
+	file.close()
+	var json = JSON.new()
+	if json.parse(json_text) != OK:
+		return {}
+	return _normalize_loaded_project(json.data)
+func _diag_issue(severity: String, message: String, fix_hint := "") -> Dictionary:
+	return {"severity": severity, "message": message, "fix_hint": fix_hint}
+
+func _diag_severity_color(severity: String) -> String:
+	match severity:
+		DIAG_SEV_ERROR:
+			return "#f44336"
+		DIAG_SEV_WARNING:
+			return "#ff9800"
+		_:
+			return "#4fc3f7"
+
+func _diag_prefix(severity: String) -> String:
+	match severity:
+		DIAG_SEV_ERROR:
+			return "ERROR"
+		DIAG_SEV_WARNING:
+			return "WARNING"
+		_:
+			return "INFO"
+
+func _format_diagnostics(issues: Array[Dictionary]) -> String:
+	var errors := 0
+	var warnings := 0
+	var infos := 0
+	for issue in issues:
+		match str(issue.get("severity", DIAG_SEV_INFO)):
+			DIAG_SEV_ERROR:
+				errors += 1
+			DIAG_SEV_WARNING:
+				warnings += 1
+			_:
+				infos += 1
+
+	var lines: Array[String] = []
+	lines.append("[color=#90caf9]Diagnostics: %d error(s), %d warning(s), %d info[/color]" % [errors, warnings, infos])
+	for issue in issues:
+		var sev = str(issue.get("severity", DIAG_SEV_INFO))
+		var msg = str(issue.get("message", ""))
+		var fix = str(issue.get("fix_hint", ""))
+		lines.append("[color=%s][%s] %s[/color]" % [_diag_severity_color(sev), _diag_prefix(sev), msg])
+		if fix != "":
+			lines.append("[color=#9e9e9e]  Suggestion: %s[/color]" % fix)
+	return "\n".join(lines)
 
 # ──────────────────────────── INIT ────────────────────────────────
 func _ready():
@@ -449,6 +531,8 @@ func _ready():
 	_setup_onboarding_ui()
 	_load_ui_prefs()
 	_init_autosave()
+	_init_analytics()
+	_track_event("app_started", {"schema": PROJECT_SCHEMA_VERSION})
 	
 	# Pro Graphics Settings
 	var env = camera.environment
@@ -461,6 +545,30 @@ func _ready():
 	_log("Flyntic Studio initialized", "success")
 	if not _onboarding_seen:
 		call_deferred("_start_onboarding")
+
+func _init_analytics():
+	if not _analytics_enabled:
+		return
+	var mk_err = DirAccess.make_dir_recursive_absolute(ANALYTICS_DIR)
+	if mk_err != OK and mk_err != ERR_ALREADY_EXISTS:
+		_log("Failed to initialize analytics directory", "warning")
+
+func _track_event(name: String, payload: Dictionary = {}):
+	if not _analytics_enabled:
+		return
+	var file = FileAccess.open(ANALYTICS_EVENTS_PATH, FileAccess.READ_WRITE)
+	if file == null:
+		file = FileAccess.open(ANALYTICS_EVENTS_PATH, FileAccess.WRITE)
+	if file == null:
+		return
+	file.seek_end()
+	var evt = {
+		"name": name,
+		"ts": Time.get_unix_time_from_system(),
+		"payload": payload,
+	}
+	file.store_line(JSON.stringify(evt))
+	file.close()
 
 func _setup_topbar_menu_actions():
 	if not is_instance_valid(topbar_menus):
@@ -1655,6 +1763,8 @@ func _input(event):
 		# Camera shortcuts
 		if event.keycode == KEY_HOME:
 			_reset_camera()
+		if event.keycode == KEY_F9 and not sim_locked:
+			_run_guided_remediation()
 		if event.keycode == KEY_F and not sim_locked:
 			_focus_selected()
 		if event.keycode == KEY_F11:
@@ -2325,6 +2435,7 @@ func _on_play():
 		return
 
 	_log("Executing Flight Plan: " + str(sim_sequence.size()) + " steps", "info")
+	_track_event("simulation_started", {"steps": sim_sequence.size(), "bridge": _bridge_active()})
 	
 	# Initialize simulation state (single init, no duplication)
 	sim_state = "playing"
@@ -2427,6 +2538,7 @@ func _on_stop():
 	if _bridge_active():
 		bridge.cmd_stop()
 		_log("Bridge: Simulation stopped & reset", "info")
+	_track_event("simulation_stopped", {"elapsed": sim_time})
 	
 	# Unlock UI (all modes)
 	_set_ui_locked(false)
@@ -2816,8 +2928,23 @@ func _remove_main_frame_and_dependents(frame_id: String):
 		_refresh_wiring_view()
 	_log("Removed main frame (%s) and cleared assembly. You can place a new frame now." % frame_id, "warning")
 
+func _run_guided_remediation():
+	if sim_state == "playing":
+		_log("Cannot run remediation during simulation", "warning")
+		return
+	for c in placed:
+		if c.type == "Frame" or c.type == "Propeller":
+			continue
+		_auto_wire_component(c)
+	_prune_invalid_wiring_connections()
+	if tabs.current_tab < tabs.get_tab_count() and tabs.get_tab_title(tabs.current_tab) == "Wiring":
+		_refresh_wiring_view()
+	_update_all()
+	_log("Guided remediation applied (common wiring fixes)", "success")
+	_track_event("guided_remediation_applied", {"connections": wiring_connections.size()})
+
 func _update_diagnostics():
-	var issues := []
+	var issues: Array[Dictionary] = []
 	var has_bat := false
 	var has_frame := false
 	var motor_count := 0
@@ -2832,32 +2959,34 @@ func _update_diagnostics():
 
 	# Show live sim info when playing
 	if sim_state == "playing" or sim_state == "paused":
-		issues.append("[color=#2196f3]SIM: %s | Time: %.1fs[/color]" % [sim_state.to_upper(), sim_time])
+		issues.append(_diag_issue(DIAG_SEV_INFO, "SIM: %s | Time: %.1fs" % [sim_state.to_upper(), sim_time]))
 		if sim_step_idx < sim_sequence.size():
-			issues.append("[color=#2196f3]Step %d/%d: %s[/color]" % [sim_step_idx + 1, sim_sequence.size(), sim_sequence[sim_step_idx].type])
-			issues.append("[color=#2196f3]Alt: %.2fm | Pos: (%.1f, %.1f)[/color]" % [components_group.position.y, components_group.position.x, components_group.position.z])
+			issues.append(_diag_issue(DIAG_SEV_INFO, "Step %d/%d: %s" % [sim_step_idx + 1, sim_sequence.size(), sim_sequence[sim_step_idx].type]))
+			issues.append(_diag_issue(DIAG_SEV_INFO, "Alt: %.2fm | Pos: (%.1f, %.1f)" % [components_group.position.y, components_group.position.x, components_group.position.z]))
 		else:
-			issues.append("[color=#4caf50]Flight plan completed[/color]")
-		diag_text.text = "\n".join(issues)
+			issues.append(_diag_issue(DIAG_SEV_INFO, "Flight plan completed"))
+		diag_text.text = _format_diagnostics(issues)
 		return
 
 	if not has_frame:
-		issues.append("[color=#f44336]No frame detected[/color]")
+		issues.append(_diag_issue(DIAG_SEV_ERROR, "No frame detected", "Add one frame before simulation"))
 	if not has_bat:
-		issues.append("[color=#f44336]No battery placed[/color]")
+		issues.append(_diag_issue(DIAG_SEV_ERROR, "No battery placed", "Add a battery and wire power rails"))
 	if motor_count == 0:
-		issues.append("[color=#f44336]No motors installed[/color]")
+		issues.append(_diag_issue(DIAG_SEV_ERROR, "No motors installed", "Place at least 1 motor (4 recommended)"))
 	elif motor_count < 4:
-		issues.append("[color=#ff9800]Only %d motors (4 recommended)[/color]" % motor_count)
+		issues.append(_diag_issue(DIAG_SEV_WARNING, "Only %d motors (4 recommended)" % motor_count, "Place additional motors for stable quad behavior"))
 	if prop_count < motor_count:
-		issues.append("[color=#ff9800]%d motors missing propellers[/color]" % (motor_count - prop_count))
+		issues.append(_diag_issue(DIAG_SEV_WARNING, "%d motors missing propellers" % (motor_count - prop_count), "Attach propellers to all active motors"))
 	if issues.size() == 0:
-		issues.append("[color=#4caf50]All systems nominal[/color]")
+		issues.append(_diag_issue(DIAG_SEV_INFO, "All systems nominal"))
 	# Wiring integration
 	var wiring_issues = _check_wiring_for_preflight()
 	issues.append_array(wiring_issues)
+	if wiring_issues.size() > 0:
+		issues.append(_diag_issue(DIAG_SEV_INFO, "Press F9 to auto-fix common wiring issues"))
 
-	diag_text.text = "\n".join(issues)
+	diag_text.text = _format_diagnostics(issues)
 
 # ──────────────────────────── UTILS ───────────────────────────────
 func _clear_children(n: Node):
@@ -3553,6 +3682,7 @@ func _on_graph_connection_request(from_node: StringName, from_port: int, to_node
 	var dst_comp_type = _get_comp_type_by_uid(str(dst_node))
 	if not _is_wiring_type_allowed(src_comp_type, dst_comp_type):
 		_log("Invalid wiring rule: %s cannot connect to %s" % [src_comp_type, dst_comp_type], "error")
+		_track_event("wiring_connection_rejected", {"reason": "type_rule", "from": src_comp_type, "to": dst_comp_type})
 		return
 
 	var from_type = _get_graph_output_type(src_gnode, src_port)
@@ -3560,6 +3690,7 @@ func _on_graph_connection_request(from_node: StringName, from_port: int, to_node
 	
 	if from_type != to_type:
 		_log("Pin type mismatch! (Use matching colors)", "error")
+		_track_event("wiring_connection_rejected", {"reason": "pin_type_mismatch", "from_port": src_port, "to_port": dst_port})
 		return
 		
 	for w in wiring_connections:
@@ -3574,6 +3705,7 @@ func _on_graph_connection_request(from_node: StringName, from_port: int, to_node
 		"to_port": dst_port
 	})
 	_log("Wired nodes successfully", "success")
+	_track_event("wiring_connected", {"from": str(src_node), "to": str(dst_node)})
 
 func _on_graph_disconnection_request(from_node: StringName, from_port: int, to_node: StringName, to_port: int):
 	if sim_state == "playing": return
@@ -3598,6 +3730,7 @@ func _init_autosave():
 		_log("Failed to initialize autosave directory", "warning")
 	if FileAccess.file_exists(AUTOSAVE_LATEST_PATH):
 		_log("Autosave snapshot available", "info")
+		_maybe_prompt_restore_autosave()
 
 func _tick_autosave(delta: float):
 	if not _autosave_enabled:
@@ -3671,11 +3804,13 @@ func _write_project_file(path: String, data: Dictionary, log_success := true) ->
 	var file = FileAccess.open(path, FileAccess.WRITE)
 	if file == null:
 		_log("Failed to write project: " + path, "error")
+		_track_event("project_save_failed", {"path": path})
 		return false
 	file.store_string(JSON.stringify(data, "\t"))
 	file.close()
 	if log_success:
 		_log("Project saved: " + path, "success")
+		_track_event("project_saved", {"path": path, "components": data.get("placed", []).size()})
 	return true
 
 func _normalize_loaded_project(raw_data: Variant) -> Dictionary:
@@ -3826,10 +3961,12 @@ func _load_project():
 		var normalized = _normalize_loaded_project(json.data)
 		if normalized.is_empty():
 			_log("Invalid project schema!", "error")
+			_track_event("project_load_failed", {"path": path, "reason": "schema_invalid"})
 			fd.queue_free()
 			return
 		_apply_loaded_project_data(normalized)
 		_log("Project loaded: " + path, "success")
+		_track_event("project_loaded", {"path": path, "components": normalized.get("placed", []).size()})
 		fd.queue_free()
 	)
 	fd.canceled.connect(func(): fd.queue_free())
@@ -4005,9 +4142,9 @@ func _get_comp_type_by_uid(uid_str: String) -> String:
 			return COMPONENTS[c.id].type
 	return ""
 
-func _check_wiring_for_preflight() -> Array[String]:
+func _check_wiring_for_preflight() -> Array[Dictionary]:
 	"""Check realistic wiring connections for problems."""
-	var issues: Array[String] = []
+	var issues: Array[Dictionary] = []
 	var has_fc := false
 	var has_esc := false
 	var has_motor := false
@@ -4061,23 +4198,23 @@ func _check_wiring_for_preflight() -> Array[String]:
 			camera_to_vtx = true
 
 	if has_fc and not has_esc:
-		issues.append("[color=#ff9800]Missing ESC (FC needs ESC for motor drive)[/color]")
+		issues.append(_diag_issue(DIAG_SEV_WARNING, "Missing ESC (FC needs ESC for motor drive)", "Add ESC and connect PWM from FC"))
 	if has_esc and not esc_to_fc:
-		issues.append("[color=#ff9800]ESC signal not wired to Flight Controller PWM[/color]")
+		issues.append(_diag_issue(DIAG_SEV_WARNING, "ESC signal not wired to Flight Controller PWM", "Connect FC PWM output to ESC PWM input"))
 	if has_motor and has_esc and not motor_to_esc:
-		issues.append("[color=#ff9800]Motors not wired to ESC motor outputs[/color]")
+		issues.append(_diag_issue(DIAG_SEV_WARNING, "Motors not wired to ESC motor outputs", "Connect ESC motor ports to each motor phase input"))
 	if has_fc and not power_to_fc:
-		issues.append("[color=#ff9800]Flight Controller has no power wiring (Battery/PDB/BEC)[/color]")
+		issues.append(_diag_issue(DIAG_SEV_ERROR, "Flight Controller has no power wiring (Battery/PDB/BEC)", "Provide FC power and GND from Battery/PDB/BEC"))
 	if has_esc and not power_to_esc:
-		issues.append("[color=#ff9800]ESC has no battery/PDB power wiring[/color]")
+		issues.append(_diag_issue(DIAG_SEV_ERROR, "ESC has no battery/PDB power wiring", "Connect ESC power and GND to Battery/PDB"))
 	if has_rx and not rx_to_fc:
-		issues.append("[color=#ff9800]Receiver not wired to FC serial/SBUS input[/color]")
+		issues.append(_diag_issue(DIAG_SEV_WARNING, "Receiver not wired to FC serial/SBUS input", "Connect RX SBUS/CRSF to FC serial input"))
 	if has_gps and not gps_to_fc:
-		issues.append("[color=#ff9800]GPS not wired to FC UART[/color]")
+		issues.append(_diag_issue(DIAG_SEV_WARNING, "GPS not wired to FC UART", "Wire GPS TX/RX to FC UART RX/TX"))
 	if has_camera and has_vtx and not camera_to_vtx:
-		issues.append("[color=#ff9800]FPV Camera video is not wired to VTX[/color]")
+		issues.append(_diag_issue(DIAG_SEV_WARNING, "FPV Camera video is not wired to VTX", "Connect Camera video output to VTX video input"))
 	if has_vtx and not has_camera:
-		issues.append("[color=#ff9800]VTX installed without FPV Camera video source[/color]")
+		issues.append(_diag_issue(DIAG_SEV_WARNING, "VTX installed without FPV Camera video source", "Add camera or remove VTX"))
 	return issues
 
 # ──────────────────────────── BLOCK DETACH ────────────────────────
