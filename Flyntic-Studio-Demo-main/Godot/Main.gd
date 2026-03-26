@@ -417,6 +417,8 @@ var _autosave_bootstrapped := false
 var _autosave_restore_prompted := false
 var _analytics_enabled := true
 var _analytics_service: RefCounted = null
+var _module_loader_service: RefCounted = null
+var _diagnostics_service: RefCounted = null
 var _environment_service: RefCounted = null
 var _swarm_controller: RefCounted = null
 var _telemetry_recorder: RefCounted = null
@@ -627,105 +629,99 @@ func _track_event(name: String, payload: Dictionary = {}):
 	_analytics_service.track_event(name, payload)
 
 func _init_environment_modules():
-	var runtime_mode_script = load("res://services/RuntimeModeService.gd")
-	if runtime_mode_script != null:
-		_runtime_mode_service = runtime_mode_script.new()
-	else:
-		_log("Runtime mode service missing", "warning")
+	if _module_loader_service == null:
+		var loader_script = load("res://services/ModuleLoaderService.gd")
+		if loader_script != null:
+			_module_loader_service = loader_script.new()
+		else:
+			_log("Module loader service missing", "warning")
 
-	var runtime_input_script = load("res://services/RuntimeInputService.gd")
-	if runtime_input_script != null:
-		_runtime_input_service = runtime_input_script.new()
-	else:
-		_log("Runtime input service missing", "warning")
+	if _diagnostics_service == null:
+		var diagnostics_script = load("res://services/DiagnosticsService.gd")
+		if diagnostics_script != null:
+			_diagnostics_service = diagnostics_script.new()
+		else:
+			_log("Diagnostics service missing", "warning")
 
-	var flight_assist_script = load("res://services/FlightAssistService.gd")
-	if flight_assist_script != null:
-		_flight_assist_service = flight_assist_script.new()
-	else:
-		_log("Flight assist service missing", "warning")
+	if _module_loader_service == null:
+		_log("Module loader unavailable, skipping module bootstrap", "warning")
+		return
 
-	var simulation_coordinator_script = load("res://services/SimulationCoordinatorService.gd")
-	if simulation_coordinator_script != null:
-		_simulation_coordinator_service = simulation_coordinator_script.new()
-	else:
-		_log("Simulation coordinator service missing", "warning")
+	var runtime_result = _module_loader_service.load_modules([
+		{"key": "runtime_mode", "path": "res://services/RuntimeModeService.gd", "missing_msg": "Runtime mode service missing"},
+		{"key": "runtime_input", "path": "res://services/RuntimeInputService.gd", "missing_msg": "Runtime input service missing"},
+		{"key": "flight_assist", "path": "res://services/FlightAssistService.gd", "missing_msg": "Flight assist service missing"},
+		{"key": "simulation_coordinator", "path": "res://services/SimulationCoordinatorService.gd", "missing_msg": "Simulation coordinator service missing"},
+		{"key": "mission_runtime", "path": "res://services/MissionRuntimeService.gd", "missing_msg": "Mission runtime service missing"},
+		{"key": "swarm_telemetry", "path": "res://services/SwarmTelemetryService.gd", "missing_msg": "Swarm telemetry service missing"},
+		{"key": "environment", "path": "res://services/EnvironmentPhysicsService.gd", "missing_msg": "Environment physics module missing", "configure": {"low_hardware_mode": _low_hardware_mode}},
+		{"key": "swarm", "path": "res://SwarmController.gd", "missing_msg": "Swarm module missing"},
+		{"key": "mission", "path": "res://MissionPlanner.gd", "missing_msg": "Mission planner module missing", "configure": {"arrival_radius": 0.8, "cruise_speed": 2.8}},
+		{"key": "sensor", "path": "res://services/SensorModelService.gd", "missing_msg": "Sensor model module missing", "configure": {"seed": 1337}},
+		{"key": "replay", "path": "res://ReplayRunner.gd", "missing_msg": "Replay runner module missing"},
+		{"key": "safety", "path": "res://services/SafetyLayer.gd", "missing_msg": "Safety layer module missing", "configure": {
+			"enabled": _safety_enabled,
+			"geofence_radius": 14.0,
+			"rtl_altitude": 2.8,
+			"battery_rtl_threshold": 0.18,
+		}},
+	])
 
-	var mission_runtime_script = load("res://services/MissionRuntimeService.gd")
-	if mission_runtime_script != null:
-		_mission_runtime_service = mission_runtime_script.new()
-	else:
-		_log("Mission runtime service missing", "warning")
+	for msg in runtime_result.get("warnings", []):
+		_log(str(msg), "warning")
 
-	var swarm_telemetry_script = load("res://services/SwarmTelemetryService.gd")
-	if swarm_telemetry_script != null:
-		_swarm_telemetry_service = swarm_telemetry_script.new()
-	else:
-		_log("Swarm telemetry service missing", "warning")
+	var modules: Dictionary = runtime_result.get("modules", {})
+	_runtime_mode_service = modules.get("runtime_mode", null)
+	_runtime_input_service = modules.get("runtime_input", null)
+	_flight_assist_service = modules.get("flight_assist", null)
+	_simulation_coordinator_service = modules.get("simulation_coordinator", null)
+	_mission_runtime_service = modules.get("mission_runtime", null)
+	_swarm_telemetry_service = modules.get("swarm_telemetry", null)
+	_environment_service = modules.get("environment", null)
+	_swarm_controller = modules.get("swarm", null)
+	_mission_planner = modules.get("mission", null)
+	_sensor_model = modules.get("sensor", null)
+	_replay_runner = modules.get("replay", null)
+	_safety_layer = modules.get("safety", null)
 
-	var env_script = load("res://services/EnvironmentPhysicsService.gd")
-	if env_script != null:
-		_environment_service = env_script.new()
-		_environment_service.configure({"low_hardware_mode": _low_hardware_mode})
-	else:
-		_log("Environment physics module missing", "warning")
-
-	var swarm_script = load("res://SwarmController.gd")
-	if swarm_script != null:
-		_swarm_controller = swarm_script.new()
+	if _swarm_controller != null:
 		var swarm_root = components_group.get_node_or_null("SwarmFollowers") as Node3D
 		if not is_instance_valid(swarm_root):
 			swarm_root = Node3D.new()
 			swarm_root.name = "SwarmFollowers"
 			components_group.add_child(swarm_root)
 		_swarm_controller.initialize(swarm_root)
-	else:
-		_log("Swarm module missing", "warning")
-
-	var mission_script = load("res://MissionPlanner.gd")
-	if mission_script != null:
-		_mission_planner = mission_script.new()
-		_mission_planner.configure({"arrival_radius": 0.8, "cruise_speed": 2.8})
-	else:
-		_log("Mission planner module missing", "warning")
-
-	var sensor_script = load("res://services/SensorModelService.gd")
-	if sensor_script != null:
-		_sensor_model = sensor_script.new()
-		_sensor_model.configure({"seed": 1337})
-	else:
-		_log("Sensor model module missing", "warning")
-
-	var replay_script = load("res://ReplayRunner.gd")
-	if replay_script != null:
-		_replay_runner = replay_script.new()
-	else:
-		_log("Replay runner module missing", "warning")
-
-	var safety_script = load("res://services/SafetyLayer.gd")
-	if safety_script != null:
-		_safety_layer = safety_script.new()
-		_safety_layer.configure({
-			"enabled": _safety_enabled,
-			"geofence_radius": 14.0,
-			"rtl_altitude": 2.8,
-			"battery_rtl_threshold": 0.18,
-		})
-	else:
-		_log("Safety layer module missing", "warning")
 
 func _init_telemetry():
-	var telemetry_script = load("res://services/TelemetryRecorder.gd")
-	if telemetry_script == null:
-		_log("Telemetry recorder module missing", "warning")
+	if _module_loader_service == null:
+		var loader_script = load("res://services/ModuleLoaderService.gd")
+		if loader_script != null:
+			_module_loader_service = loader_script.new()
+	if _module_loader_service == null:
+		_log("Telemetry init skipped: module loader unavailable", "warning")
 		return
-	_telemetry_recorder = telemetry_script.new()
-	_telemetry_recorder.initialize(TELEMETRY_DIR)
-	var validator_script = load("res://services/TelemetryDataValidator.gd")
-	if validator_script != null:
-		_telemetry_validator = validator_script.new()
-	else:
-		_log("Telemetry validator module missing", "warning")
+
+	var telemetry_result = _module_loader_service.load_modules([
+		{
+			"key": "telemetry",
+			"path": "res://services/TelemetryRecorder.gd",
+			"missing_msg": "Telemetry recorder module missing",
+			"post_init": func(instance):
+				instance.initialize(TELEMETRY_DIR),
+		},
+		{
+			"key": "validator",
+			"path": "res://services/TelemetryDataValidator.gd",
+			"missing_msg": "Telemetry validator module missing",
+		},
+	])
+
+	for msg in telemetry_result.get("warnings", []):
+		_log(str(msg), "warning")
+
+	var modules: Dictionary = telemetry_result.get("modules", {})
+	_telemetry_recorder = modules.get("telemetry", null)
+	_telemetry_validator = modules.get("validator", null)
 
 func _toggle_swarm():
 	if _swarm_controller == null:
@@ -2100,80 +2096,113 @@ func _input(event):
 	if _process_toolbox_drag(event):
 		return
 
-	# CRITICAL: Ignore 3D interactions if we are not ở Canvas tab hoặc đang simulation
-	if tabs.current_tab != 0:
+	var is_canvas_tab = tabs.current_tab == 0
+	if _runtime_input_service != null:
+		is_canvas_tab = _runtime_input_service.canvas_active(tabs.current_tab)
+
+	# CRITICAL: Ignore 3D interactions if we are not on Canvas tab
+	if not is_canvas_tab:
 		orbiting = false
 		panning = false
 		return
 
-	# Nếu đang simulation thì chỉ cho phép điều khiển camera (orbit, pan, zoom), KHÔNG cho phép chọn, thêm, xóa, di chuyển, wiring
+	# During simulation only camera interactions are allowed.
 	var sim_locked = sim_state == "playing"
 
 	if event is InputEventMouseButton:
 		var in_canvas = vpc.get_global_rect().has_point(get_global_mouse_position())
-		match event.button_index:
-			MOUSE_BUTTON_LEFT:
-				if event.pressed:
-					if not sim_locked:
-						if ghost:
-							if in_canvas:
-								var snap = _find_snap()
-								if snap:
-									var moving_uid = _moving_component_uid
-									_place(cur_id, snap.pos, snap.port, snap.parent_uid, moving_uid, moving_uid == -1, moving_uid == -1)
-									_moving_component_uid = -1
-									_moving_component_snapshot.clear()
-									_cancel_ghost()
-								else:
-									var mpos = viewport.get_mouse_position()
-									var ro = camera.project_ray_origin(mpos)
-									var rd = camera.project_ray_normal(mpos)
-									var gp = Plane(Vector3.UP, 0)
-									var ghit = gp.intersects_ray(ro, rd)
-									if ghit:
-										var moving_uid = _moving_component_uid
-										_place(cur_id, ghit + Vector3(0, 0.5, 0), "", -1, moving_uid, moving_uid == -1, moving_uid == -1)
-										_moving_component_uid = -1
-										_moving_component_snapshot.clear()
-										_cancel_ghost()
-						elif in_canvas:
-							# Try to pick up existing component
-							_pick_existing()
-							if not ghost: # If nothing picked, start orbiting
-								orbiting = true
+		var mouse_rt: Dictionary = {}
+		if _runtime_input_service != null:
+			mouse_rt = _runtime_input_service.resolve_mouse_button({
+				"button_index": event.button_index,
+				"pressed": event.pressed,
+				"in_canvas": in_canvas,
+				"sim_locked": sim_locked,
+				"ghost_active": ghost != null,
+			})
+		else:
+			mouse_rt = {"action": "noop"}
+
+		var mouse_action = str(mouse_rt.get("action", "noop"))
+		if mouse_action == "left_release":
+			orbiting = false
+			panning = false
+		elif mouse_action == "orbit_only":
+			orbiting = bool(mouse_rt.get("orbiting", false))
+			panning = false
+		elif mouse_action == "place_ghost":
+			var snap = _find_snap()
+			if snap:
+				var moving_uid = _moving_component_uid
+				_place(cur_id, snap.pos, snap.port, snap.parent_uid, moving_uid, moving_uid == -1, moving_uid == -1)
+				_moving_component_uid = -1
+				_moving_component_snapshot.clear()
+				_cancel_ghost()
+			else:
+				var mpos = viewport.get_mouse_position()
+				var ro = camera.project_ray_origin(mpos)
+				var rd = camera.project_ray_normal(mpos)
+				var gp = Plane(Vector3.UP, 0)
+				var ghit = gp.intersects_ray(ro, rd)
+				if ghit:
+					var moving_uid = _moving_component_uid
+					_place(cur_id, ghit + Vector3(0, 0.5, 0), "", -1, moving_uid, moving_uid == -1, moving_uid == -1)
+					_moving_component_uid = -1
+					_moving_component_snapshot.clear()
+					_cancel_ghost()
+		elif mouse_action == "pick_or_orbit":
+			_pick_existing()
+			if not ghost:
+				orbiting = true
+		elif mouse_action == "set_pan":
+			panning = bool(mouse_rt.get("panning", false))
+		elif mouse_action == "zoom":
+			var zoom_delta = float(mouse_rt.get("zoom_delta", 0.0))
+			if zoom_delta != 0.0:
+				zoom = clamp(zoom + zoom_delta, 1.0, 60.0)
+		else:
+			# Fallback behavior when runtime input service is unavailable.
+			match event.button_index:
+				MOUSE_BUTTON_LEFT:
+					if event.pressed and in_canvas:
+						orbiting = true
 					else:
-						# Khi đang simulation, chỉ cho phép orbit camera
-						if in_canvas:
-							orbiting = true
-				else:
-					orbiting = false
-					panning = false
-			MOUSE_BUTTON_RIGHT:
-				if in_canvas:
-					panning = event.pressed
-				else:
-					panning = false
-			MOUSE_BUTTON_MIDDLE:
-				if in_canvas:
-					panning = event.pressed
-				else:
-					panning = false
-			MOUSE_BUTTON_WHEEL_UP:
-				if tabs.current_tab == 0 and in_canvas:
-					zoom = max(1.0, zoom - 1.5)
-			MOUSE_BUTTON_WHEEL_DOWN:
-				if tabs.current_tab == 0 and in_canvas:
-					zoom = min(60.0, zoom + 1.5)
+						orbiting = false
+						panning = false
+				MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE:
+					panning = event.pressed and in_canvas
+				MOUSE_BUTTON_WHEEL_UP:
+					if in_canvas:
+						zoom = max(1.0, zoom - 1.5)
+				MOUSE_BUTTON_WHEEL_DOWN:
+					if in_canvas:
+						zoom = min(60.0, zoom + 1.5)
 
 	if event is InputEventMouseMotion:
-		if orbiting:
-			_cam_yaw_vel -= event.relative.x * 0.005
-			_cam_pitch_vel -= event.relative.y * 0.005
-		elif panning:
-			var pan_speed = zoom * 0.001
-			var cam_basis = camera.global_transform.basis
-			pivot.global_position -= cam_basis.x * event.relative.x * pan_speed
-			pivot.global_position += cam_basis.y * event.relative.y * pan_speed
+		if _runtime_input_service != null:
+			var motion_rt = _runtime_input_service.resolve_mouse_motion({
+				"relative": event.relative,
+				"orbiting": orbiting,
+				"panning": panning,
+				"zoom": zoom,
+			})
+			var motion_action = str(motion_rt.get("action", "noop"))
+			if motion_action == "orbit":
+				_cam_yaw_vel += float(motion_rt.get("yaw_delta", 0.0))
+				_cam_pitch_vel += float(motion_rt.get("pitch_delta", 0.0))
+			elif motion_action == "pan":
+				var cam_basis = camera.global_transform.basis
+				pivot.global_position += cam_basis.x * float(motion_rt.get("pan_x", 0.0))
+				pivot.global_position += cam_basis.y * float(motion_rt.get("pan_y", 0.0))
+		else:
+			if orbiting:
+				_cam_yaw_vel -= event.relative.x * 0.005
+				_cam_pitch_vel -= event.relative.y * 0.005
+			elif panning:
+				var pan_speed = zoom * 0.001
+				var cam_basis = camera.global_transform.basis
+				pivot.global_position -= cam_basis.x * event.relative.x * pan_speed
+				pivot.global_position += cam_basis.y * event.relative.y * pan_speed
 
 	if event is InputEventKey and event.pressed:
 		_handle_runtime_shortcuts(event, sim_locked)
@@ -3255,7 +3284,24 @@ func _simulate_bridge(delta: float):
 						bridge.cmd_land()
 						_log("Bridge → Land", "info")
 
-		if sim_step_timer >= step.duration:
+		if _simulation_coordinator_service != null:
+			var advance_rt = _simulation_coordinator_service.advance_step_state({
+				"sim_step_idx": sim_step_idx,
+				"sim_step_timer": sim_step_timer,
+				"sim_sequence": sim_sequence,
+				"sim_time": sim_time,
+				"completion_suffix": " — hovering",
+			})
+			sim_step_idx = int(advance_rt.get("sim_step_idx", sim_step_idx))
+			sim_step_timer = float(advance_rt.get("sim_step_timer", sim_step_timer))
+			if bool(advance_rt.get("advanced", false)):
+				if bool(advance_rt.get("has_next", false)):
+					_log(str(advance_rt.get("next_step_log", "")), "info")
+				elif bool(advance_rt.get("completed", false)):
+					bridge.cmd_hover()  # Hold position after program ends
+					_log(str(advance_rt.get("completion_log", "✓ Flight plan completed")), "success")
+					sim_label.text = str(advance_rt.get("finished_label", "✓ Finished"))
+		elif sim_step_timer >= step.duration:
 			sim_step_idx += 1
 			sim_step_timer = 0.0
 			if sim_step_idx < sim_sequence.size():
@@ -3341,52 +3387,84 @@ func _simulate_kinematic(delta: float, check: Dictionary):
 	if sim_state == "playing" and sim_step_idx < sim_sequence.size():
 		var step = sim_sequence[sim_step_idx]
 		sim_step_timer += delta
+
+		if _simulation_coordinator_service != null:
+			var step_rt = _simulation_coordinator_service.apply_kinematic_step_action({
+				"step_type": str(step.type),
+				"step_value": float(step.value),
+				"step_duration": float(step.duration),
+				"delta": delta,
+				"sim_target_pos": sim_target_pos,
+				"sim_target_rot": sim_target_rot,
+				"basis_x": components_group.global_transform.basis.x,
+				"basis_z": components_group.global_transform.basis.z,
+			})
+			sim_target_pos = step_rt.get("sim_target_pos", sim_target_pos)
+			sim_target_rot = step_rt.get("sim_target_rot", sim_target_rot)
+		else:
+			match step.type:
+				"take_off":
+					sim_target_pos.y = 2.5
+				"forward":
+					var target_dist = step.value * 0.05
+					var forward_dir = -components_group.global_transform.basis.z
+					forward_dir.y = 0
+					forward_dir = forward_dir.normalized()
+					sim_target_pos += forward_dir * target_dist * (delta / step.duration)
+					if sim_target_pos.y < 2.0: sim_target_pos.y = 2.5
+				"backward":
+					var target_dist = step.value * 0.05
+					var back_dir = components_group.global_transform.basis.z
+					back_dir.y = 0
+					back_dir = back_dir.normalized()
+					sim_target_pos += back_dir * target_dist * (delta / step.duration)
+					if sim_target_pos.y < 2.0: sim_target_pos.y = 2.5
+				"move_left":
+					var target_dist = step.value * 0.05
+					var left_dir = -components_group.global_transform.basis.x
+					left_dir.y = 0
+					left_dir = left_dir.normalized()
+					sim_target_pos += left_dir * target_dist * (delta / step.duration)
+					if sim_target_pos.y < 2.0: sim_target_pos.y = 2.5
+				"move_right":
+					var target_dist = step.value * 0.05
+					var right_dir = components_group.global_transform.basis.x
+					right_dir.y = 0
+					right_dir = right_dir.normalized()
+					sim_target_pos += right_dir * target_dist * (delta / step.duration)
+					if sim_target_pos.y < 2.0: sim_target_pos.y = 2.5
+				"turn_left":
+					var angle_total = deg_to_rad(step.value)
+					sim_target_rot.y += angle_total * (delta / step.duration)
+				"turn_right":
+					var angle_total = deg_to_rad(step.value)
+					sim_target_rot.y -= angle_total * (delta / step.duration)
+				"set_altitude":
+					sim_target_pos.y = step.value
+				"hover", "wait":
+					pass
+				"land":
+					sim_target_pos.y = 0.0
 		
-		match step.type:
-			"take_off":
-				sim_target_pos.y = 2.5
-			"forward":
-				var target_dist = step.value * 0.05
-				var forward_dir = -components_group.global_transform.basis.z
-				forward_dir.y = 0
-				forward_dir = forward_dir.normalized()
-				sim_target_pos += forward_dir * target_dist * (delta / step.duration)
-				if sim_target_pos.y < 2.0: sim_target_pos.y = 2.5
-			"backward":
-				var target_dist = step.value * 0.05
-				var back_dir = components_group.global_transform.basis.z
-				back_dir.y = 0
-				back_dir = back_dir.normalized()
-				sim_target_pos += back_dir * target_dist * (delta / step.duration)
-				if sim_target_pos.y < 2.0: sim_target_pos.y = 2.5
-			"move_left":
-				var target_dist = step.value * 0.05
-				var left_dir = -components_group.global_transform.basis.x
-				left_dir.y = 0
-				left_dir = left_dir.normalized()
-				sim_target_pos += left_dir * target_dist * (delta / step.duration)
-				if sim_target_pos.y < 2.0: sim_target_pos.y = 2.5
-			"move_right":
-				var target_dist = step.value * 0.05
-				var right_dir = components_group.global_transform.basis.x
-				right_dir.y = 0
-				right_dir = right_dir.normalized()
-				sim_target_pos += right_dir * target_dist * (delta / step.duration)
-				if sim_target_pos.y < 2.0: sim_target_pos.y = 2.5
-			"turn_left":
-				var angle_total = deg_to_rad(step.value)
-				sim_target_rot.y += angle_total * (delta / step.duration)
-			"turn_right":
-				var angle_total = deg_to_rad(step.value)
-				sim_target_rot.y -= angle_total * (delta / step.duration)
-			"set_altitude":
-				sim_target_pos.y = step.value
-			"hover", "wait":
-				pass
-			"land":
-				sim_target_pos.y = 0.0
-		
-		if sim_step_timer >= step.duration:
+		if _simulation_coordinator_service != null:
+			var advance_rt = _simulation_coordinator_service.advance_step_state({
+				"sim_step_idx": sim_step_idx,
+				"sim_step_timer": sim_step_timer,
+				"sim_sequence": sim_sequence,
+				"sim_time": sim_time,
+			})
+			sim_step_idx = int(advance_rt.get("sim_step_idx", sim_step_idx))
+			sim_step_timer = float(advance_rt.get("sim_step_timer", sim_step_timer))
+			if bool(advance_rt.get("advanced", false)):
+				if bool(advance_rt.get("has_next", false)):
+					var next_step: Dictionary = advance_rt.get("next_step", {})
+					_log(str(advance_rt.get("next_step_log", "")), "info")
+					_highlight_block(next_step)
+				elif bool(advance_rt.get("completed", false)):
+					_clear_block_highlights()
+					_log(str(advance_rt.get("completion_log", "✓ Flight plan completed")), "success")
+					sim_label.text = str(advance_rt.get("finished_label", "✓ Finished"))
+		elif sim_step_timer >= step.duration:
 			sim_step_idx += 1
 			sim_step_timer = 0.0
 			if sim_step_idx < sim_sequence.size():
@@ -3652,89 +3730,37 @@ func _run_guided_remediation():
 
 func _update_diagnostics():
 	var issues: Array[Dictionary] = []
-	var has_bat := false
-	var has_frame := false
-	var motor_count := 0
-	var prop_count := 0
-
-	for c in placed:
-		var c_type = c["type"]
-		if c_type == "Battery": has_bat = true
-		elif c_type == "Frame": has_frame = true
-		elif c_type == "Motor": motor_count += 1
-		elif c_type == "Propeller": prop_count += 1
-
-	# Show live sim info when playing
-	if sim_state == "playing" or sim_state == "paused":
-		issues.append(_diag_issue(DIAG_SEV_INFO, "SIM: %s | Time: %.1fs" % [sim_state.to_upper(), sim_time]))
-		if sim_step_idx < sim_sequence.size():
-			issues.append(_diag_issue(DIAG_SEV_INFO, "Step %d/%d: %s" % [sim_step_idx + 1, sim_sequence.size(), sim_sequence[sim_step_idx].type]))
-			issues.append(_diag_issue(DIAG_SEV_INFO, "Alt: %.2fm | Pos: (%.1f, %.1f)" % [components_group.position.y, components_group.position.x, components_group.position.z]))
-		else:
-			issues.append(_diag_issue(DIAG_SEV_INFO, "Flight plan completed"))
+	if _diagnostics_service != null:
+		issues = _diagnostics_service.build_issues({
+			"diag_error": DIAG_SEV_ERROR,
+			"diag_warning": DIAG_SEV_WARNING,
+			"diag_info": DIAG_SEV_INFO,
+			"placed": placed,
+			"sim_state": sim_state,
+			"sim_time": sim_time,
+			"sim_step_idx": sim_step_idx,
+			"sim_sequence": sim_sequence,
+			"position": components_group.position,
+			"wiring_issues": _check_wiring_for_preflight(),
+			"env_state": _env_state,
+			"swarm_enabled": _swarm_enabled,
+			"swarm_count": _swarm_controller.follower_count() if _swarm_controller != null else 0,
+			"swarm_behavior": _swarm_behavior,
+			"telemetry_active": _telemetry_recorder != null and _telemetry_recorder.is_active(),
+			"low_hardware_mode": _low_hardware_mode,
+			"mission_active": _mission_active,
+			"mission_mode": _mission_planner.mode() if _mission_planner != null else "n/a",
+			"flight_control_mode": _flight_control_mode,
+			"replay_active": _replay_active,
+			"sensor_health": float(_sensor_state.get("health", 1.0)),
+			"safety_enabled": _safety_enabled,
+			"battery_ratio": _estimate_remaining_battery_ratio(sim_time),
+			"safety_state": _safety_state,
+		})
 		diag_text.text = _format_diagnostics(issues)
 		return
 
-	if not has_frame:
-		issues.append(_diag_issue(DIAG_SEV_ERROR, "No frame detected", "Add one frame before simulation"))
-	if not has_bat:
-		issues.append(_diag_issue(DIAG_SEV_ERROR, "No battery placed", "Add a battery and wire power rails"))
-	if motor_count == 0:
-		issues.append(_diag_issue(DIAG_SEV_ERROR, "No motors installed", "Place at least 1 motor (4 recommended)"))
-	elif motor_count < 4:
-		issues.append(_diag_issue(DIAG_SEV_WARNING, "Only %d motors (4 recommended)" % motor_count, "Place additional motors for stable quad behavior"))
-	if prop_count < motor_count:
-		issues.append(_diag_issue(DIAG_SEV_WARNING, "%d motors missing propellers" % (motor_count - prop_count), "Attach propellers to all active motors"))
-	if issues.size() == 0:
-		issues.append(_diag_issue(DIAG_SEV_INFO, "All systems nominal"))
-	# Wiring integration
-	var wiring_issues = _check_wiring_for_preflight()
-	issues.append_array(wiring_issues)
-	if wiring_issues.size() > 0:
-		issues.append(_diag_issue(DIAG_SEV_INFO, "Press F9 to auto-fix common wiring issues"))
-
-	issues.append(_diag_issue(
-		DIAG_SEV_INFO,
-		"Env wind=(%.2f, %.2f, %.2f), EMI=(%.2f, %.2f, %.2f), light=%.2f" % [
-			_env_state.get("wind", Vector3.ZERO).x,
-			_env_state.get("wind", Vector3.ZERO).y,
-			_env_state.get("wind", Vector3.ZERO).z,
-			_env_state.get("emi", Vector3.ZERO).x,
-			_env_state.get("emi", Vector3.ZERO).y,
-			_env_state.get("emi", Vector3.ZERO).z,
-			float(_env_state.get("luminance", 1.0)),
-		]
-	))
-	issues.append(_diag_issue(
-		DIAG_SEV_INFO,
-		"Swarm=%s (%d, %s), Telemetry=%s, LowHW=%s" % [
-			"ON" if _swarm_enabled else "OFF",
-			_swarm_controller.follower_count() if _swarm_controller != null else 0,
-			_swarm_behavior,
-			"ON" if (_telemetry_recorder != null and _telemetry_recorder.is_active()) else "OFF",
-			"ON" if _low_hardware_mode else "OFF",
-		]
-	))
-	issues.append(_diag_issue(
-		DIAG_SEV_INFO,
-		"Mission=%s (%s), Control=%s, Replay=%s, SensorHealth=%.2f, Safety=%s" % [
-			"ON" if _mission_active else "OFF",
-			_mission_planner.mode() if _mission_planner != null else "n/a",
-			_flight_control_mode,
-			"ON" if _replay_active else "OFF",
-			float(_sensor_state.get("health", 1.0)),
-			"ON" if _safety_enabled else "OFF",
-		]
-	))
-	issues.append(_diag_issue(
-		DIAG_SEV_INFO,
-		"Battery %.0f%%, SafetyMode=%s, Reason=%s" % [
-			_estimate_remaining_battery_ratio(sim_time) * 100.0,
-			str(_safety_state.get("mode", "none")).to_upper(),
-			str(_safety_state.get("reason", "")),
-		]
-	))
-
+	issues.append(_diag_issue(DIAG_SEV_WARNING, "Diagnostics service unavailable", "Reload services or restart app"))
 	diag_text.text = _format_diagnostics(issues)
 
 func _estimate_flight_minutes() -> float:

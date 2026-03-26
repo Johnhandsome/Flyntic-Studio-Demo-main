@@ -36,16 +36,16 @@ This file tracks decomposition of `Godot/Main.gd` into focused services.
 
 ## Remaining High-Value Splits
 
-- [ ] SimulationCoordinator
+- [x] SimulationCoordinator
   - Move `_simulate`, bridge/kinematic routing, and step orchestration.
-  - Status: replay/safety/step-label + prop-spin + cannot-fly settle + bridge-land decision + bridge/kinematic top-level routing + bridge step-start command dispatch moved.
-  - Remaining: broader simulation state transitions and deeper step orchestration extraction.
-- [ ] RuntimeInputController
-  - Keep reducing direct input logic in `_input` (mouse/canvas branches remain).
-- [ ] DiagnosticsService
-  - Move diagnostics issue assembly and formatting orchestration.
-- [ ] ModuleLoaderService
-  - Consolidate script load/init pattern currently repeated in `Main.gd`.
+  - Status: replay/safety/step-label + prop-spin + cannot-fly settle + bridge-land decision + bridge/kinematic top-level routing + bridge step-start command dispatch + shared step transition state handling + kinematic per-step action transform moved.
+  - Remaining: minor orchestration glue in `Main.gd` (optional cleanup only).
+- [x] RuntimeInputController
+  - Mouse/canvas intent routing extracted to `RuntimeInputService`; `Main.gd` now applies action results.
+- [x] DiagnosticsService
+  - Diagnostics issue assembly moved to `Godot/services/DiagnosticsService.gd`.
+- [x] ModuleLoaderService
+  - Script load/init/config flow consolidated in `Godot/services/ModuleLoaderService.gd` and wired from `Main.gd`.
 
 ## Notes
 

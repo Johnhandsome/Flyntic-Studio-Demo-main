@@ -184,3 +184,115 @@ func build_bridge_step_start_action(payload: Dictionary) -> Dictionary:
 			}
 
 	return {"has_action": false}
+
+func advance_step_state(payload: Dictionary) -> Dictionary:
+	var sim_step_idx = int(payload.get("sim_step_idx", 0))
+	var sim_step_timer = float(payload.get("sim_step_timer", 0.0))
+	var sim_sequence: Array = payload.get("sim_sequence", [])
+	var sim_time = float(payload.get("sim_time", 0.0))
+	var completion_suffix = str(payload.get("completion_suffix", ""))
+
+	if sim_step_idx < 0 or sim_step_idx >= sim_sequence.size():
+		return {
+			"advanced": false,
+			"sim_step_idx": sim_step_idx,
+			"sim_step_timer": sim_step_timer,
+			"completed": false,
+		}
+
+	var step: Dictionary = sim_sequence[sim_step_idx]
+	var step_duration = float(step.get("duration", 0.01))
+	if sim_step_timer < step_duration:
+		return {
+			"advanced": false,
+			"sim_step_idx": sim_step_idx,
+			"sim_step_timer": sim_step_timer,
+			"completed": false,
+		}
+
+	sim_step_idx += 1
+	sim_step_timer = 0.0
+	if sim_step_idx < sim_sequence.size():
+		var next_step: Dictionary = sim_sequence[sim_step_idx]
+		return {
+			"advanced": true,
+			"sim_step_idx": sim_step_idx,
+			"sim_step_timer": sim_step_timer,
+			"completed": false,
+			"has_next": true,
+			"next_step": next_step,
+			"next_step_log": "Step %d/%d: %s" % [sim_step_idx + 1, sim_sequence.size(), str(next_step.get("type", "step"))],
+		}
+
+	return {
+		"advanced": true,
+		"sim_step_idx": sim_step_idx,
+		"sim_step_timer": sim_step_timer,
+		"completed": true,
+		"has_next": false,
+		"completion_log": "✓ Flight plan completed (%.1fs)%s" % [sim_time, completion_suffix],
+		"finished_label": "✓ Finished (%d steps)" % sim_sequence.size(),
+	}
+
+func apply_kinematic_step_action(payload: Dictionary) -> Dictionary:
+	var step_type = str(payload.get("step_type", ""))
+	var step_value = float(payload.get("step_value", 0.0))
+	var step_duration = float(payload.get("step_duration", 0.01))
+	var delta = float(payload.get("delta", 0.0))
+	var sim_target_pos: Vector3 = payload.get("sim_target_pos", Vector3.ZERO)
+	var sim_target_rot: Vector3 = payload.get("sim_target_rot", Vector3.ZERO)
+	var basis_x: Vector3 = payload.get("basis_x", Vector3.RIGHT)
+	var basis_z: Vector3 = payload.get("basis_z", Vector3.FORWARD)
+
+	match step_type:
+		"take_off":
+			sim_target_pos.y = 2.5
+		"forward":
+			var target_dist = step_value * 0.05
+			var forward_dir = -basis_z
+			forward_dir.y = 0.0
+			forward_dir = forward_dir.normalized()
+			sim_target_pos += forward_dir * target_dist * (delta / max(step_duration, 0.01))
+			if sim_target_pos.y < 2.0:
+				sim_target_pos.y = 2.5
+		"backward":
+			var back_target_dist = step_value * 0.05
+			var back_dir = basis_z
+			back_dir.y = 0.0
+			back_dir = back_dir.normalized()
+			sim_target_pos += back_dir * back_target_dist * (delta / max(step_duration, 0.01))
+			if sim_target_pos.y < 2.0:
+				sim_target_pos.y = 2.5
+		"move_left":
+			var left_target_dist = step_value * 0.05
+			var left_dir = -basis_x
+			left_dir.y = 0.0
+			left_dir = left_dir.normalized()
+			sim_target_pos += left_dir * left_target_dist * (delta / max(step_duration, 0.01))
+			if sim_target_pos.y < 2.0:
+				sim_target_pos.y = 2.5
+		"move_right":
+			var right_target_dist = step_value * 0.05
+			var right_dir = basis_x
+			right_dir.y = 0.0
+			right_dir = right_dir.normalized()
+			sim_target_pos += right_dir * right_target_dist * (delta / max(step_duration, 0.01))
+			if sim_target_pos.y < 2.0:
+				sim_target_pos.y = 2.5
+		"turn_left":
+			var angle_total = deg_to_rad(step_value)
+			sim_target_rot.y += angle_total * (delta / max(step_duration, 0.01))
+		"turn_right":
+			var angle_total_r = deg_to_rad(step_value)
+			sim_target_rot.y -= angle_total_r * (delta / max(step_duration, 0.01))
+		"set_altitude":
+			sim_target_pos.y = step_value
+		"hover", "wait":
+			pass
+		"land":
+			sim_target_pos.y = 0.0
+
+	return {
+		"sim_target_pos": sim_target_pos,
+		"sim_target_rot": sim_target_rot,
+	}

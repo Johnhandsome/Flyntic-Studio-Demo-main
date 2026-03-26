@@ -1,5 +1,8 @@
 extends RefCounted
 
+func canvas_active(tab_index: int) -> bool:
+	return tab_index == 0
+
 func resolve_key_actions(event: InputEventKey, sim_locked: bool, ghost_active: bool) -> Array[String]:
 	var actions: Array[String] = []
 	if not event.pressed:
@@ -50,3 +53,88 @@ func resolve_key_actions(event: InputEventKey, sim_locked: bool, ghost_active: b
 		actions.append("toggle_fullscreen")
 
 	return actions
+
+func resolve_mouse_button(payload: Dictionary) -> Dictionary:
+	var button_index = int(payload.get("button_index", 0))
+	var pressed = bool(payload.get("pressed", false))
+	var in_canvas = bool(payload.get("in_canvas", false))
+	var sim_locked = bool(payload.get("sim_locked", false))
+	var ghost_active = bool(payload.get("ghost_active", false))
+
+	if button_index == MOUSE_BUTTON_LEFT:
+		if not pressed:
+			return {
+				"action": "left_release",
+				"orbiting": false,
+				"panning": false,
+			}
+		if sim_locked:
+			return {
+				"action": "orbit_only",
+				"orbiting": in_canvas,
+				"panning": false,
+			}
+		if ghost_active and in_canvas:
+			return {
+				"action": "place_ghost",
+				"orbiting": false,
+				"panning": false,
+			}
+		if in_canvas:
+			return {
+				"action": "pick_or_orbit",
+				"orbiting": false,
+				"panning": false,
+			}
+		return {
+			"action": "noop",
+			"orbiting": false,
+			"panning": false,
+		}
+
+	if button_index == MOUSE_BUTTON_RIGHT or button_index == MOUSE_BUTTON_MIDDLE:
+		return {
+			"action": "set_pan",
+			"orbiting": false,
+			"panning": pressed and in_canvas,
+		}
+
+	if button_index == MOUSE_BUTTON_WHEEL_UP:
+		return {
+			"action": "zoom",
+			"zoom_delta": -1.5 if in_canvas else 0.0,
+		}
+	if button_index == MOUSE_BUTTON_WHEEL_DOWN:
+		return {
+			"action": "zoom",
+			"zoom_delta": 1.5 if in_canvas else 0.0,
+		}
+
+	return {
+		"action": "noop",
+	}
+
+func resolve_mouse_motion(payload: Dictionary) -> Dictionary:
+	var rel: Vector2 = payload.get("relative", Vector2.ZERO)
+	var orbiting = bool(payload.get("orbiting", false))
+	var panning = bool(payload.get("panning", false))
+	var zoom = float(payload.get("zoom", 10.0))
+
+	if orbiting:
+		return {
+			"action": "orbit",
+			"yaw_delta": -rel.x * 0.005,
+			"pitch_delta": -rel.y * 0.005,
+		}
+
+	if panning:
+		var pan_speed = zoom * 0.001
+		return {
+			"action": "pan",
+			"pan_x": -rel.x * pan_speed,
+			"pan_y": rel.y * pan_speed,
+		}
+
+	return {
+		"action": "noop",
+	}
