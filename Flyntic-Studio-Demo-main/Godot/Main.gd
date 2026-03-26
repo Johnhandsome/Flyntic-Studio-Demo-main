@@ -409,6 +409,7 @@ var _autosave_last_hash := 0
 var _autosave_bootstrapped := false
 var _autosave_restore_prompted := false
 var _analytics_enabled := true
+var _analytics_service: RefCounted = null
 func _maybe_prompt_restore_autosave():
 	if _autosave_restore_prompted:
 		return
@@ -549,26 +550,24 @@ func _ready():
 func _init_analytics():
 	if not _analytics_enabled:
 		return
-	var mk_err = DirAccess.make_dir_recursive_absolute(ANALYTICS_DIR)
-	if mk_err != OK and mk_err != ERR_ALREADY_EXISTS:
+	if _analytics_service == null:
+		var analytics_script = load("res://AnalyticsService.gd")
+		if analytics_script == null:
+			_log("Analytics service script missing", "warning")
+			return
+		_analytics_service = analytics_script.new(ANALYTICS_DIR, ANALYTICS_EVENTS_PATH)
+	var mk_err = _analytics_service.initialize()
+	if mk_err != OK:
 		_log("Failed to initialize analytics directory", "warning")
 
 func _track_event(name: String, payload: Dictionary = {}):
 	if not _analytics_enabled:
 		return
-	var file = FileAccess.open(ANALYTICS_EVENTS_PATH, FileAccess.READ_WRITE)
-	if file == null:
-		file = FileAccess.open(ANALYTICS_EVENTS_PATH, FileAccess.WRITE)
-	if file == null:
+	if _analytics_service == null:
+		_init_analytics()
+	if _analytics_service == null:
 		return
-	file.seek_end()
-	var evt = {
-		"name": name,
-		"ts": Time.get_unix_time_from_system(),
-		"payload": payload,
-	}
-	file.store_line(JSON.stringify(evt))
-	file.close()
+	_analytics_service.track_event(name, payload)
 
 func _setup_topbar_menu_actions():
 	if not is_instance_valid(topbar_menus):
@@ -609,37 +608,19 @@ func _on_topbar_menu_pressed(btn: BaseButton):
 	_log("Menu: " + btn.text, "info")
 
 func _show_analytics_dashboard():
-	if not FileAccess.file_exists(ANALYTICS_EVENTS_PATH):
+	if _analytics_service == null:
+		_init_analytics()
+	if _analytics_service == null:
+		_log("Analytics service unavailable", "warning")
+		return
+	var summary = _analytics_service.summarize_events()
+	if not bool(summary.get("ok", false)):
 		_log("No analytics events yet", "info")
 		return
-	var file = FileAccess.open(ANALYTICS_EVENTS_PATH, FileAccess.READ)
-	if file == null:
-		_log("Cannot open analytics events", "warning")
-		return
-	var total := 0
-	var counts := {}
-	var first_ts := 0.0
-	var last_ts := 0.0
-	while not file.eof_reached():
-		var line = file.get_line().strip_edges()
-		if line == "":
-			continue
-		var json = JSON.new()
-		if json.parse(line) != OK:
-			continue
-		if typeof(json.data) != TYPE_DICTIONARY:
-			continue
-		var evt: Dictionary = json.data
-		var name = str(evt.get("name", "unknown"))
-		counts[name] = int(counts.get(name, 0)) + 1
-		total += 1
-		var ts = float(evt.get("ts", 0.0))
-		if ts > 0.0:
-			if first_ts == 0.0 or ts < first_ts:
-				first_ts = ts
-			if ts > last_ts:
-				last_ts = ts
-	file.close()
+	var total = int(summary.get("total", 0))
+	var counts: Dictionary = summary.get("counts", {})
+	var first_ts = float(summary.get("first_ts", 0.0))
+	var last_ts = float(summary.get("last_ts", 0.0))
 
 	var sim_started = int(counts.get("simulation_started", 0))
 	var sim_stopped = int(counts.get("simulation_stopped", 0))

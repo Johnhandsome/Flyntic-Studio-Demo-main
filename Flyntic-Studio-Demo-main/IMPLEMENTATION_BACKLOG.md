@@ -30,7 +30,7 @@ This backlog is ordered by business impact and release risk.
 
 ## Sprint 1 (Week 1-2)
 - [x] Doc alignment
-- [ ] Architecture split design doc
+- [x] Architecture split design doc
 - [x] Save/load schema versioning
 
 ## Sprint 2 (Week 3-4)
