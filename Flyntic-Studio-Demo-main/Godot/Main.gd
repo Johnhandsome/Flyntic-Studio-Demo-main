@@ -1135,6 +1135,22 @@ func _setup_onboarding_ui():
 			"card_side": "left",
 			"hint": "B5: Chay va theo doi",
 		},
+		{
+			"title": "Tinh nang Nang cao (Hotkeys)",
+			"body": "App ho tro nhieu tinh nang nang cao (bấm các phím F). F2: Doi hinh Swarm, F3: Che do dieu khien (Auto/Manual), F5: Bat Failsafe an toan, F8: Doi Profile vat ly (Low/High).",
+			"target_path": "Root/Content/CenterRight/Center/Console",
+			"tab": 0,
+			"card_side": "top",
+			"hint": "B6: Tinh nang nang cao & Moi truong",
+		},
+		{
+			"title": "Du lieu (Telemetry & Replay)",
+			"body": "Trong khi chay, bam F6 de ghi Telemetry, F4 de check chat luong Data. F10 de bat Auto Mission, F12 de Replay chuyen bay tu file data.",
+			"target_path": "Root/Content/CenterRight/Right/Scroll/V/SimPanel",
+			"tab": 0,
+			"card_side": "left",
+			"hint": "B7: Phanthich Data ML",
+		}
 	]
 
 	_onboarding_overlay = Control.new()

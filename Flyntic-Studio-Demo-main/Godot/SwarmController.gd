@@ -17,6 +17,51 @@ var _separation_radius := 1.5
 var _separation_weight := 2.5
 var _collision_incidents := 0
 
+func initialize(container: Node3D):
+	_container = container
+
+func spawn_followers(count: int, leader_position: Vector3):
+	clear_followers()
+	if _container == null:
+		return
+	for i in range(max(count, 0)):
+		var n = Node3D.new()
+		n.name = "SwarmFollower_%d" % i
+		
+		# Low-hardware friendly proxy mesh for followers
+		var body = MeshInstance3D.new()
+		var m = SphereMesh.new()
+		m.radius = 0.18
+		m.height = 0.36
+		m.radial_segments = 8
+		m.rings = 4
+		body.mesh = m
+		var mat = StandardMaterial3D.new()
+		mat.albedo_color = Color(0.2, 0.9, 0.9, 0.85)
+		mat.emission_enabled = true
+		mat.emission = Color(0.1, 0.6, 0.8)
+		mat.emission_energy_multiplier = 1.2
+		body.material_override = mat
+		n.add_child(body)
+		
+		var angle = float(i) / float(max(count, 1)) * TAU
+		n.global_position = leader_position + Vector3(cos(angle), 0.4 + float(i % 3) * 0.25, sin(angle)) * _formation_radius
+		_container.add_child(n)
+		_followers.append({"id": "swarm_%d" % i, "node": n, "vel": Vector3.ZERO, "custom_offset": Vector3.ZERO})
+
+func clear_followers():
+	for f in _followers:
+		var n = f.get("node")
+		if is_instance_valid(n):
+			n.queue_free()
+	_followers.clear()
+
+func is_active() -> bool:
+	return _followers.size() > 0
+
+func follower_count() -> int:
+	return _followers.size()
+
 func get_collision_incidents() -> int:
 	return _collision_incidents
 

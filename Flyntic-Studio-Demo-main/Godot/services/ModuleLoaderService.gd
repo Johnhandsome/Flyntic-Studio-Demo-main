@@ -1,6 +1,6 @@
 extends RefCounted
 
-func load_modules(specs: Array[Dictionary]) -> Dictionary:
+func load_modules(specs: Array) -> Dictionary:
 	var modules := {}
 	var warnings: Array[String] = []
 
