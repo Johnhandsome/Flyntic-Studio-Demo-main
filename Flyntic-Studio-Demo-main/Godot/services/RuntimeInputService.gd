@@ -35,6 +35,10 @@ func resolve_key_actions(event: InputEventKey, sim_locked: bool, ghost_active: b
 		actions.append("cycle_control_mode")
 	if event.keycode == KEY_F2 and not sim_locked:
 		actions.append("cycle_swarm_behavior")
+	if event.keycode == KEY_BRACKETLEFT and not sim_locked:
+		actions.append("decrease_swarm_count")
+	if event.keycode == KEY_BRACKETRIGHT and not sim_locked:
+		actions.append("increase_swarm_count")
 	if event.keycode == KEY_F7 and not sim_locked:
 		actions.append("toggle_swarm")
 	if event.keycode == KEY_F8:
@@ -66,12 +70,6 @@ func resolve_mouse_button(payload: Dictionary) -> Dictionary:
 			return {
 				"action": "left_release",
 				"orbiting": false,
-				"panning": false,
-			}
-		if sim_locked:
-			return {
-				"action": "orbit_only",
-				"orbiting": in_canvas,
 				"panning": false,
 			}
 		if ghost_active and in_canvas:

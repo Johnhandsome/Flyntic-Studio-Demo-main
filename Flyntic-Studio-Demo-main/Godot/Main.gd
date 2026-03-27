@@ -359,6 +359,8 @@ var props_weight_lbl: Label = null
 var props_thrust_lbl: Label = null
 var props_pos_lbl: Label = null
 var _selected_uid := -1
+var _selected_swarm_idx := -1
+var _dragging_swarm_idx := -1
 
 # Onboarding UI refs/state
 var _onboarding_seen := false
@@ -442,6 +444,7 @@ var _replay_runner: RefCounted = null
 var _safety_layer: RefCounted = null
 var _swarm_enabled := false
 var _swarm_count := 0
+var _target_swarm_count := 3
 var _swarm_behavior := SWARM_BEHAVIOR_LEADER_FOLLOWER
 var _low_hardware_mode := true
 var _physics_profile := PHYSICS_PROFILE_LOW_HARDWARE
@@ -811,12 +814,23 @@ func _toggle_swarm():
 		_show_toast("Swarm disabled", "info")
 		_track_event("swarm_disabled")
 		return
-	_swarm_count = clampi(max(3, placed.size() / 2), 3, 12)
+	_swarm_count = _target_swarm_count
 	_swarm_controller.spawn_followers(_swarm_count, components_group.global_position)
 	_swarm_enabled = true
 	_log("Swarm enabled: %d followers" % _swarm_count, "success")
-	_show_toast("Swarm enabled: %d followers" % _swarm_count, "success")
+	_show_toast("Swarm enabled: %d followers\n(Bấm '[' hoặc ']' để giảm/tăng số lượng drone)" % _swarm_count, "success")
 	_track_event("swarm_enabled", {"count": _swarm_count, "behavior": _swarm_behavior})
+
+func _adjust_swarm_count(delta: int):
+	_target_swarm_count = clampi(_target_swarm_count + delta, 1, 20)
+	if _swarm_enabled:
+		_swarm_count = _target_swarm_count
+		_swarm_controller.spawn_followers(_swarm_count, components_group.global_position)
+	_log("Swarm target count set to %d" % _target_swarm_count, "info")
+	_show_toast("Số lượng drone Swarm: %d\n%s" % [
+		_target_swarm_count, 
+		"(Đang chưa bật Swarm. Bấm F7 để bật)" if not _swarm_enabled else ""
+	], "info")
 
 func _cycle_swarm_behavior():
 	if _runtime_mode_service != null:
@@ -828,9 +842,9 @@ func _cycle_swarm_behavior():
 		_swarm_behavior = modes[idx]
 	var desc = ""
 	match _swarm_behavior:
-		SWARM_BEHAVIOR_LEADER_FOLLOWER: desc = "Các drone tự động bay theo sau Leader."
-		SWARM_BEHAVIOR_AREA_SWEEP: desc = "Dàn hàng ngang cùng nhau để quét khu vực."
-		SWARM_BEHAVIOR_RELAY_CHAIN: desc = "Nối đuôi nhau tạo thành chuỗi trạm tiếp sóng."
+		SWARM_BEHAVIOR_LEADER_FOLLOWER: desc = "Các drone bay theo hình tròn quanh Leader. (Bấm '[' / ']' để chỉnh số lượng)."
+		SWARM_BEHAVIOR_AREA_SWEEP: desc = "Dàn hàng ngang quét khu vực. (Bấm '[' / ']' để chỉnh số lượng)."
+		SWARM_BEHAVIOR_RELAY_CHAIN: desc = "Nối đuôi nhau tạo thành chuỗi trạm tiếp sóng. (Bấm '[' / ']' để chỉnh số lượng)."
 		_: desc = ""
 	
 	_log("Swarm behavior: " + _swarm_behavior + " - " + desc, "info")
@@ -2282,6 +2296,7 @@ func _input(event):
 		if mouse_action == "left_release":
 			orbiting = false
 			panning = false
+			_dragging_swarm_idx = -1
 		elif mouse_action == "orbit_only":
 			orbiting = bool(mouse_rt.get("orbiting", false))
 			panning = false
@@ -2307,7 +2322,7 @@ func _input(event):
 					_cancel_ghost()
 		elif mouse_action == "pick_or_orbit":
 			_pick_existing()
-			if not ghost:
+			if not ghost and _dragging_swarm_idx == -1:
 				orbiting = true
 		elif mouse_action == "set_pan":
 			panning = bool(mouse_rt.get("panning", false))
@@ -2400,6 +2415,10 @@ func _handle_runtime_shortcuts(event: InputEventKey, sim_locked: bool):
 				_cycle_swarm_behavior()
 			"toggle_swarm":
 				_toggle_swarm()
+			"decrease_swarm_count":
+				_adjust_swarm_count(-1)
+			"increase_swarm_count":
+				_adjust_swarm_count(1)
 			"cycle_physics_profile":
 				_cycle_physics_profile()
 			"toggle_safety":
@@ -2451,9 +2470,15 @@ func _process(_delta):
 	
 		if is_instance_valid(ghost):
 			_move_ghost()
-	
+		elif sim_state == "playing" and _dragging_swarm_idx != -1:
+			_move_swarm_drone()
+
 	if sim_state == "playing":
 		_simulate(_delta)
+		if _selected_uid != -1 and is_instance_valid(props_panel):
+			_update_properties(_selected_uid)
+		elif _selected_swarm_idx != -1 and is_instance_valid(props_panel):
+			_update_properties("swarm_%d" % _selected_swarm_idx)
 	_tick_autosave(_delta)
 
 # ──────────────────────────── GHOST / PLACEMENT ───────────────────
@@ -2510,6 +2535,33 @@ func _move_ghost():
 		ghost.global_position = hit + Vector3(0, 0.5, 0)
 		_ghost_tint(Color(1, 1, 1, 0.25))
 	ghost.rotation.y = ghost_rot
+
+func _move_swarm_drone():
+	if _swarm_controller == null or not _swarm_controller.is_active():
+		return
+	if _dragging_swarm_idx < 0 or _dragging_swarm_idx >= _swarm_controller.follower_count():
+		return
+
+	var mpos = viewport.get_mouse_position()
+	var ro = camera.project_ray_origin(mpos)
+	var rd = camera.project_ray_normal(mpos)
+
+	var states = _swarm_controller.get_followers_state()
+	var current_pos = states[_dragging_swarm_idx].pos
+
+	var plane = Plane(Vector3.UP, current_pos.y)
+	var hit = plane.intersects_ray(ro, rd)
+	if hit != null:
+		var leader_pos = components_group.global_position
+		var offset = hit - leader_pos
+		_swarm_controller.set_custom_offset(_dragging_swarm_idx, offset)
+		if _swarm_behavior != SwarmController.FORMATION_CUSTOM:
+			var states_all = _swarm_controller.get_followers_state()
+			for i in range(states_all.size()):
+				if i != _dragging_swarm_idx:
+					_swarm_controller.set_custom_offset(i, states_all[i].pos - leader_pos)
+			_swarm_behavior = SwarmController.FORMATION_CUSTOM
+			_log("Swarm mode changed to Custom Formation", "info")
 
 func _find_snap() -> Variant:
 	var mpos = viewport.get_mouse_position()
@@ -2658,14 +2710,28 @@ func _pick_existing():
 	var best_uid := -1
 	var best_d := 1000.0
 	
-	for c in placed:
-		if not is_instance_valid(c.node): continue
-		if c.type == "Frame": continue # Don't pick frame
-		# check if ray passes near the node
-		var to_node = c.node.global_position - ro
-		var projection = to_node.dot(rd)
-		if projection > 0:
-			var closest_point = ro + rd * projection
+	if sim_state == "playing":
+		# Only pick swarm drones during simulation
+		var best_swarm_idx := -1
+		if _swarm_controller != null and _swarm_controller.is_active():
+			var states = _swarm_controller.get_followers_state()
+			for i in range(states.size()):
+				var pos = states[i].pos
+				var to_node = pos - ro
+				var projection = to_node.dot(rd)
+				if projection > 0:
+					var closest_point = ro + rd * projection
+					var dist = closest_point.distance_to(pos)
+					if dist < 1.5 and dist < best_d:
+						best_d = dist
+						best_swarm_idx = i
+		if best_swarm_idx != -1:
+			_selected_swarm_idx = best_swarm_idx
+			_dragging_swarm_idx = best_swarm_idx
+			_update_properties("swarm_%d" % best_swarm_idx)
+			_log("Selected swarm drone #%d" % best_swarm_idx, "info")
+		return
+
 			var dist = closest_point.distance_to(c.node.global_position)
 			if dist < 1.0 and dist < best_d:
 				best_d = dist
@@ -5077,11 +5143,31 @@ func _setup_properties_panel():
 	props_pos_lbl.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
 	vb.add_child(props_pos_lbl)
 
-func _update_properties(uid: int):
-	_selected_uid = uid
+func _update_properties(uid):
+	_selected_uid = -1
+	_selected_swarm_idx = -1
+	if typeof(uid) == TYPE_INT:
+		_selected_uid = uid
+	elif typeof(uid) == TYPE_STRING and str(uid).begins_with("swarm_"):
+		var parts = str(uid).split("_")
+		if parts.size() > 1:
+			_selected_swarm_idx = int(parts[1])
+
 	if not is_instance_valid(props_panel): return
+
+	if _selected_swarm_idx != -1:
+		if _swarm_controller != null and _swarm_controller.follower_count() > _selected_swarm_idx:
+			var states = _swarm_controller.get_followers_state()
+			var p = states[_selected_swarm_idx].pos
+			props_name_lbl.text = "  Swarm Drone #%d" % _selected_swarm_idx
+			props_type_lbl.text = "  Type: Follower"
+			props_weight_lbl.text = "  Mode: " + _swarm_behavior
+			props_thrust_lbl.text = "  Spawns: %d" % _swarm_controller.follower_count()
+			props_pos_lbl.text = "  Pos: (%.1f, %.1f, %.1f)" % [p.x, p.y, p.z]
+		return
+
 	for c in placed:
-		if c.uid == uid:
+		if c.uid == _selected_uid:
 			var cdata = COMPONENTS[c.id]
 			props_name_lbl.text = "  " + c.id
 			props_type_lbl.text = "  Type: " + cdata.type

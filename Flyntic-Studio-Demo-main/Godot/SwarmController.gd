@@ -2,7 +2,7 @@ extends RefCounted
 
 var _container: Node3D = null
 var _followers: Array[Dictionary] = []
-var _formation_radius := 4.0
+var _formation_radius := 9.0
 var _max_speed := 5.5
 var _max_force := 1.2
 
@@ -13,7 +13,7 @@ const FORMATION_V := "formation_v"
 const FORMATION_LINE := "formation_line"
 const FORMATION_CUSTOM := "formation_custom"
 
-var _separation_radius := 1.5
+var _separation_radius := 4.5
 var _separation_weight := 2.5
 var _collision_incidents := 0
 
@@ -28,14 +28,17 @@ func spawn_followers(count: int, leader_position: Vector3):
 		var n = Node3D.new()
 		n.name = "SwarmFollower_%d" % i
 		
-		# Low-hardware friendly proxy mesh for followers
 		var body = MeshInstance3D.new()
-		var m = SphereMesh.new()
-		m.radius = 0.18
-		m.height = 0.36
-		m.radial_segments = 8
-		m.rings = 4
-		body.mesh = m
+		var mesh_res = load("res://Components/quad_pvc_frame.obj")
+		if mesh_res != null:
+			body.mesh = mesh_res
+			body.scale = Vector3(0.01, 0.01, 0.01) # scale to match Main drone
+		else:
+			var m = SphereMesh.new()
+			m.radius = 0.18
+			m.height = 0.36
+			body.mesh = m
+		
 		var mat = StandardMaterial3D.new()
 		mat.albedo_color = Color(0.2, 0.9, 0.9, 0.85)
 		mat.emission_enabled = true
@@ -45,8 +48,8 @@ func spawn_followers(count: int, leader_position: Vector3):
 		n.add_child(body)
 		
 		var angle = float(i) / float(max(count, 1)) * TAU
-		n.global_position = leader_position + Vector3(cos(angle), 0.4 + float(i % 3) * 0.25, sin(angle)) * _formation_radius
 		_container.add_child(n)
+		n.global_position = leader_position + Vector3(cos(angle), 0.4 + float(i % 3) * 0.25, sin(angle)) * _formation_radius
 		_followers.append({"id": "swarm_%d" % i, "node": n, "vel": Vector3.ZERO, "custom_offset": Vector3.ZERO})
 
 func clear_followers():
@@ -142,7 +145,7 @@ func _target_for_behavior(i: int, leader_pos: Vector3, behavior: String, sim_tim
 	if _followers.is_empty():
 		return leader_pos
 
-	var spacing = 1.6
+	var spacing = 4.5
 	match behavior:
 		BEHAVIOR_AREA_SWEEP:
 			var row_width = max(3, int(ceil(sqrt(_followers.size()))))
@@ -152,7 +155,7 @@ func _target_for_behavior(i: int, leader_pos: Vector3, behavior: String, sim_tim
 			return leader_pos + Vector3((float(col) - float(row_width - 1) * 0.5) * spacing + sweep, 0.9 + float(row) * 0.2, -2.0 - float(row) * spacing)
 		BEHAVIOR_RELAY_CHAIN:
 			var side = -1.0 if (i % 2 == 0) else 1.0
-			return leader_pos + Vector3(side * 0.9, 0.8 + float(i % 3) * 0.2, float(i + 1) * 1.8)
+			return leader_pos + Vector3(side * 0.9, 0.8 + float(i % 3) * 0.2, float(i + 1) * 4.0)
 		FORMATION_V:
 			var depth = int((i + 1) / 2)
 			var side = -1.0 if (i % 2 == 0) else 1.0
