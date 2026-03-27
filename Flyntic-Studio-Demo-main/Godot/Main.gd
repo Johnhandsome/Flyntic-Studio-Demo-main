@@ -320,6 +320,7 @@ var ghost_rot := 0.0
 var orbiting := false
 var panning := false
 var zoom := 12.0
+var camera_sensitivity := 0.005
 var camera_rot := Vector2(-0.5, 0.0) # Vertical (X) and Horizontal (Y) rotation
 var sim_state := "stopped" # stopped | playing | paused
 var sim_time := 0.0
@@ -687,6 +688,7 @@ func _cycle_physics_profile():
 	_physics_profile = profiles[idx]
 	_weather_preset = _default_weather_for_profile(_physics_profile)
 	_apply_phase_a_runtime_config(true)
+	_show_toast("Physics profile: %s" % _physics_profile.capitalize().replace("_", " "), "info")
 	_track_event("physics_profile_changed", {
 		"profile": _physics_profile,
 		"weather": _weather_preset,
@@ -798,12 +800,14 @@ func _toggle_swarm():
 		_swarm_enabled = false
 		_swarm_count = 0
 		_log("Swarm disabled", "info")
+		_show_toast("Swarm disabled", "info")
 		_track_event("swarm_disabled")
 		return
 	_swarm_count = clampi(max(3, placed.size() / 2), 3, 12)
 	_swarm_controller.spawn_followers(_swarm_count, components_group.global_position)
 	_swarm_enabled = true
 	_log("Swarm enabled: %d followers" % _swarm_count, "success")
+	_show_toast("Swarm enabled: %d followers" % _swarm_count, "success")
 	_track_event("swarm_enabled", {"count": _swarm_count, "behavior": _swarm_behavior})
 
 func _cycle_swarm_behavior():
@@ -815,6 +819,7 @@ func _cycle_swarm_behavior():
 		idx = (idx + 1) % modes.size()
 		_swarm_behavior = modes[idx]
 	_log("Swarm behavior: " + _swarm_behavior, "info")
+	_show_toast("Swarm behavior: %s" % _swarm_behavior.capitalize().replace("_", " "), "info")
 	_track_event("swarm_behavior_changed", {"behavior": _swarm_behavior})
 
 func _cycle_flight_control_mode():
@@ -826,6 +831,7 @@ func _cycle_flight_control_mode():
 		idx = (idx + 1) % modes.size()
 		_flight_control_mode = modes[idx]
 	_log("Flight control mode: " + _flight_control_mode, "info")
+	_show_toast("Flight mode: %s" % _flight_control_mode.capitalize().replace("_", " "), "info")
 	_track_event("flight_control_mode_changed", {"mode": _flight_control_mode})
 
 func _toggle_telemetry_recording():
@@ -835,6 +841,7 @@ func _toggle_telemetry_recording():
 	if _telemetry_recorder.is_active():
 		_telemetry_recorder.stop_session()
 		_log("Telemetry recording stopped", "info")
+		_show_toast("Telemetry recording stopped", "info")
 		_track_event("telemetry_stopped")
 		return
 	var start_result = _telemetry_recorder.start_session("drone", _build_telemetry_session_metadata())
@@ -842,9 +849,11 @@ func _toggle_telemetry_recording():
 		_last_telemetry_csv = str(start_result.get("csv", ""))
 		_last_telemetry_manifest = str(start_result.get("manifest", ""))
 		_log("Telemetry recording started", "success")
+		_show_toast("Telemetry recording started", "success")
 		_track_event("telemetry_started", {"session": str(start_result.get("session_id", ""))})
 	else:
 		_log("Telemetry recording failed to start", "error")
+		_show_toast("Telemetry recording failed to start", "error")
 
 func _toggle_autonomous_mission():
 	if _mission_planner == null:
@@ -854,12 +863,14 @@ func _toggle_autonomous_mission():
 		_mission_planner.stop()
 		_mission_active = false
 		_log("Autonomous mission disabled", "info")
+		_show_toast("Autonomous mission disabled", "info")
 		_track_event("mission_disabled")
 		return
 	_mission_planner.load_default_mission(components_group.global_position)
 	_mission_planner.start()
 	_mission_active = true
 	_log("Autonomous mission enabled (%d waypoints)" % _mission_planner.waypoint_count(), "success")
+	_show_toast("Autonomous mission enabled", "success")
 	_track_event("mission_enabled", {"waypoints": _mission_planner.waypoint_count()})
 
 func _toggle_replay_mode():
@@ -870,14 +881,17 @@ func _toggle_replay_mode():
 		_replay_runner.stop()
 		_replay_active = false
 		_log("Replay mode disabled", "info")
+		_show_toast("Replay mode disabled", "info")
 		_track_event("replay_disabled")
 		return
 	if _last_telemetry_csv == "":
 		_log("No telemetry session available for replay", "warning")
+		_show_toast("No telemetry session available for replay", "warning")
 		return
 	var load_result = _replay_runner.load_csv(_last_telemetry_csv)
 	if not bool(load_result.get("ok", false)):
 		_log("Replay load failed", "error")
+		_show_toast("Replay load failed", "error")
 		_track_event("replay_load_failed", {"reason": str(load_result.get("reason", "unknown"))})
 		return
 	_replay_runner.start()
@@ -897,6 +911,7 @@ func _toggle_replay_mode():
 			weather = str(metadata.get("weather_preset", "n/a"))
 		_log("Replay metadata: seed=%s profile=%s weather=%s" % [seed, profile, weather], "info")
 	_log("Replay mode enabled (%d samples)" % int(load_result.get("count", 0)), "success")
+	_show_toast("Replay mode enabled", "success")
 	_track_event("replay_enabled", {"count": int(load_result.get("count", 0))})
 
 func _validate_latest_telemetry():
@@ -905,13 +920,16 @@ func _validate_latest_telemetry():
 		return
 	if _last_telemetry_csv == "":
 		_log("No telemetry CSV available to validate", "warning")
+		_show_toast("No telemetry CSV available to validate", "warning")
 		return
 	var result = _telemetry_validator.validate_csv(_last_telemetry_csv)
 	if not bool(result.get("ok", false)):
 		_log("Telemetry validation failed: %s" % str(result.get("reason", "unknown")), "error")
+		_show_toast("Telemetry validation failed", "error")
 		return
 	var score = float(result.get("quality_score", 0.0))
 	_log("Telemetry quality score: %.1f" % score, "info")
+	_show_toast("Telemetry quality score: %.1f" % score, "info")
 	_log(
 		"Rows=%d, parse=%d, monotonic=%d, outliers=%d" % [
 			int(result.get("rows", 0)),
@@ -956,6 +974,7 @@ func _toggle_safety_layer():
 			"target": components_group.global_position,
 		}
 	_log("Safety layer: " + ("ON" if _safety_enabled else "OFF"), "info")
+	_show_toast("Safety layer: " + ("ON" if _safety_enabled else "OFF"), "info")
 	_track_event("safety_toggled", {"enabled": _safety_enabled})
 
 func _setup_topbar_menu_actions():
@@ -981,6 +1000,32 @@ func _setup_topbar_menu_actions():
 		metrics_btn.add_theme_color_override("font_hover_color", Color(0.9, 0.9, 0.9, 1))
 		metrics_btn.add_theme_font_size_override("font_size", 12)
 		topbar_menus.add_child(metrics_btn)
+	
+	if topbar_menus.get_node_or_null("SensContainer") == null:
+		var sens_hbox = HBoxContainer.new()
+		sens_hbox.name = "SensContainer"
+		sens_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+		sens_hbox.add_theme_constant_override("separation", 5)
+		
+		var sens_lbl = Label.new()
+		sens_lbl.text = "Mouse Sens:"
+		sens_lbl.add_theme_font_size_override("font_size", 12)
+		sens_lbl.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7, 1))
+		sens_hbox.add_child(sens_lbl)
+		
+		var sens_slider = HSlider.new()
+		sens_slider.name = "SensSlider"
+		sens_slider.custom_minimum_size = Vector2(80, 0)
+		sens_slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		sens_slider.min_value = 0.001
+		sens_slider.max_value = 0.02
+		sens_slider.step = 0.001
+		sens_slider.value = camera_sensitivity
+		sens_slider.value_changed.connect(func(v): camera_sensitivity = v)
+		sens_hbox.add_child(sens_slider)
+		
+		topbar_menus.add_child(sens_hbox)
+
 	for child in topbar_menus.get_children():
 		if child is BaseButton and not child.pressed.is_connected(_on_topbar_menu_pressed.bind(child)):
 			child.pressed.connect(_on_topbar_menu_pressed.bind(child))
@@ -2272,6 +2317,7 @@ func _input(event):
 				"orbiting": orbiting,
 				"panning": panning,
 				"zoom": zoom,
+				"sensitivity": camera_sensitivity,
 			})
 			var motion_action = str(motion_rt.get("action", "noop"))
 			if motion_action == "orbit":
@@ -2283,8 +2329,8 @@ func _input(event):
 				pivot.global_position += cam_basis.y * float(motion_rt.get("pan_y", 0.0))
 		else:
 			if orbiting:
-				_cam_yaw_vel -= event.relative.x * 0.005
-				_cam_pitch_vel -= event.relative.y * 0.005
+				_cam_yaw_vel -= event.relative.x * camera_sensitivity
+				_cam_pitch_vel -= event.relative.y * camera_sensitivity
 			elif panning:
 				var pan_speed = zoom * 0.001
 				var cam_basis = camera.global_transform.basis
@@ -3810,6 +3856,7 @@ func _run_guided_remediation():
 		_refresh_wiring_view()
 	_update_all()
 	_log("Guided remediation applied (common wiring fixes)", "success")
+	_show_toast("Guided remediation applied", "success")
 	_track_event("guided_remediation_applied", {"connections": wiring_connections.size()})
 
 func _update_diagnostics():

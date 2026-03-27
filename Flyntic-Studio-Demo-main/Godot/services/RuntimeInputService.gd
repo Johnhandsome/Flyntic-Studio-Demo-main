@@ -119,12 +119,13 @@ func resolve_mouse_motion(payload: Dictionary) -> Dictionary:
 	var orbiting = bool(payload.get("orbiting", false))
 	var panning = bool(payload.get("panning", false))
 	var zoom = float(payload.get("zoom", 10.0))
+	var sensitivity = float(payload.get("sensitivity", 0.005))
 
 	if orbiting:
 		return {
 			"action": "orbit",
-			"yaw_delta": -rel.x * 0.005,
-			"pitch_delta": -rel.y * 0.005,
+			"yaw_delta": -rel.x * sensitivity,
+			"pitch_delta": -rel.y * sensitivity,
 		}
 
 	if panning:
