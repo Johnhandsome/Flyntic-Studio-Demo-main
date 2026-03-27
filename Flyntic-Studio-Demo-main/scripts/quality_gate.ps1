@@ -8,7 +8,9 @@ $requiredFiles = @(
     "IMPLEMENTATION_BACKLOG.md",
     "docs/release/RELEASE_SMOKE_CHECKLIST.md",
     "docs/release/RC_ROLLBACK_PLAYBOOK.md",
-    "Godot/tests/run_tests.gd"
+    "Godot/tests/run_tests.gd",
+    "Godot/tests/phase_a_acceptance.gd",
+    "scripts/run_phase_a_acceptance.ps1"
 )
 
 foreach ($f in $requiredFiles) {

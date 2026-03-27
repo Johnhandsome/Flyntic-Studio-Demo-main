@@ -38,7 +38,7 @@ func resolve_key_actions(event: InputEventKey, sim_locked: bool, ghost_active: b
 	if event.keycode == KEY_F7 and not sim_locked:
 		actions.append("toggle_swarm")
 	if event.keycode == KEY_F8:
-		actions.append("toggle_low_hardware")
+		actions.append("cycle_physics_profile")
 	if event.keycode == KEY_F5:
 		actions.append("toggle_safety")
 	if event.keycode == KEY_F10 and not sim_locked:

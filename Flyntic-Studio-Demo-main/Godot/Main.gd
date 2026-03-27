@@ -409,6 +409,12 @@ const CTRL_MODE_ADAPTIVE_HOVER := "adaptive_hover"
 const SWARM_BEHAVIOR_LEADER_FOLLOWER := "leader_follower"
 const SWARM_BEHAVIOR_AREA_SWEEP := "area_sweep"
 const SWARM_BEHAVIOR_RELAY_CHAIN := "relay_chain"
+const PHYSICS_PROFILE_LOW_HARDWARE := "low_hardware"
+const PHYSICS_PROFILE_BALANCED := "balanced"
+const PHYSICS_PROFILE_HIGH_FIDELITY := "high_fidelity"
+const WEATHER_PRESET_CLEAR_DAY := "clear_day"
+const WEATHER_PRESET_WINDY_EVENING := "windy_evening"
+const WEATHER_PRESET_STORM := "storm"
 
 var _autosave_enabled := true
 var _autosave_timer := 0.0
@@ -437,6 +443,9 @@ var _swarm_enabled := false
 var _swarm_count := 0
 var _swarm_behavior := SWARM_BEHAVIOR_LEADER_FOLLOWER
 var _low_hardware_mode := true
+var _physics_profile := PHYSICS_PROFILE_LOW_HARDWARE
+var _weather_preset := WEATHER_PRESET_CLEAR_DAY
+var _environment_seed := 1337
 var _safety_enabled := true
 var _flight_control_mode := CTRL_MODE_MANUAL_ASSIST
 var _telemetry_sample_timer := 0.0
@@ -459,6 +468,11 @@ var _env_state := {
 	"wind": Vector3.ZERO,
 	"drag": Vector3.ZERO,
 	"emi": Vector3.ZERO,
+	"emi_channels": {
+		"gps_drift": Vector3.ZERO,
+		"magnetometer_bias": Vector3.ZERO,
+		"gyro_jitter": Vector3.ZERO,
+	},
 	"luminance": 1.0,
 }
 var _safety_state := {
@@ -590,6 +604,7 @@ func _ready():
 	_load_ui_prefs()
 	_init_autosave()
 	_init_analytics()
+	_weather_preset = _default_weather_for_profile(_physics_profile)
 	_init_environment_modules()
 	_init_telemetry()
 	_track_event("app_started", {"schema": PROJECT_SCHEMA_VERSION})
@@ -628,6 +643,56 @@ func _track_event(name: String, payload: Dictionary = {}):
 		return
 	_analytics_service.track_event(name, payload)
 
+func _profile_to_low_hardware(profile_name: String) -> bool:
+	return profile_name == PHYSICS_PROFILE_LOW_HARDWARE
+
+func _default_weather_for_profile(profile_name: String) -> String:
+	match profile_name:
+		PHYSICS_PROFILE_BALANCED:
+			return WEATHER_PRESET_WINDY_EVENING
+		PHYSICS_PROFILE_HIGH_FIDELITY:
+			return WEATHER_PRESET_STORM
+		_:
+			return WEATHER_PRESET_CLEAR_DAY
+
+func _build_environment_runtime_config() -> Dictionary:
+	return {
+		"seed": _environment_seed,
+		"physics_profile": _physics_profile,
+		"weather_preset": _weather_preset,
+		"low_hardware_mode": _low_hardware_mode,
+	}
+
+func _build_sensor_runtime_config() -> Dictionary:
+	return {
+		"seed": _environment_seed,
+		"physics_profile": _physics_profile,
+	}
+
+func _apply_phase_a_runtime_config(log_change := false):
+	_low_hardware_mode = _profile_to_low_hardware(_physics_profile)
+	if _environment_service != null:
+		_environment_service.configure(_build_environment_runtime_config())
+	if _sensor_model != null:
+		_sensor_model.configure(_build_sensor_runtime_config())
+	if log_change:
+		_log("Physics profile: %s | Weather: %s | Seed: %d" % [_physics_profile, _weather_preset, _environment_seed], "info")
+
+func _cycle_physics_profile():
+	var profiles = [PHYSICS_PROFILE_LOW_HARDWARE, PHYSICS_PROFILE_BALANCED, PHYSICS_PROFILE_HIGH_FIDELITY]
+	var idx = profiles.find(_physics_profile)
+	if idx < 0:
+		idx = 0
+	idx = (idx + 1) % profiles.size()
+	_physics_profile = profiles[idx]
+	_weather_preset = _default_weather_for_profile(_physics_profile)
+	_apply_phase_a_runtime_config(true)
+	_track_event("physics_profile_changed", {
+		"profile": _physics_profile,
+		"weather": _weather_preset,
+		"seed": _environment_seed,
+	})
+
 func _init_environment_modules():
 	if _module_loader_service == null:
 		var loader_script = load("res://services/ModuleLoaderService.gd")
@@ -654,10 +719,10 @@ func _init_environment_modules():
 		{"key": "simulation_coordinator", "path": "res://services/SimulationCoordinatorService.gd", "missing_msg": "Simulation coordinator service missing"},
 		{"key": "mission_runtime", "path": "res://services/MissionRuntimeService.gd", "missing_msg": "Mission runtime service missing"},
 		{"key": "swarm_telemetry", "path": "res://services/SwarmTelemetryService.gd", "missing_msg": "Swarm telemetry service missing"},
-		{"key": "environment", "path": "res://services/EnvironmentPhysicsService.gd", "missing_msg": "Environment physics module missing", "configure": {"low_hardware_mode": _low_hardware_mode}},
+		{"key": "environment", "path": "res://services/EnvironmentPhysicsService.gd", "missing_msg": "Environment physics module missing", "configure": _build_environment_runtime_config()},
 		{"key": "swarm", "path": "res://SwarmController.gd", "missing_msg": "Swarm module missing"},
 		{"key": "mission", "path": "res://MissionPlanner.gd", "missing_msg": "Mission planner module missing", "configure": {"arrival_radius": 0.8, "cruise_speed": 2.8}},
-		{"key": "sensor", "path": "res://services/SensorModelService.gd", "missing_msg": "Sensor model module missing", "configure": {"seed": 1337}},
+		{"key": "sensor", "path": "res://services/SensorModelService.gd", "missing_msg": "Sensor model module missing", "configure": _build_sensor_runtime_config()},
 		{"key": "replay", "path": "res://ReplayRunner.gd", "missing_msg": "Replay runner module missing"},
 		{"key": "safety", "path": "res://services/SafetyLayer.gd", "missing_msg": "Safety layer module missing", "configure": {
 			"enabled": _safety_enabled,
@@ -683,6 +748,7 @@ func _init_environment_modules():
 	_sensor_model = modules.get("sensor", null)
 	_replay_runner = modules.get("replay", null)
 	_safety_layer = modules.get("safety", null)
+	_apply_phase_a_runtime_config()
 
 	if _swarm_controller != null:
 		var swarm_root = components_group.get_node_or_null("SwarmFollowers") as Node3D
@@ -823,9 +889,13 @@ func _toggle_replay_mode():
 	if typeof(manifest) == TYPE_DICTIONARY and not manifest.is_empty():
 		var metadata = manifest.get("metadata", {})
 		var seed = "n/a"
+		var profile = "n/a"
+		var weather = "n/a"
 		if typeof(metadata) == TYPE_DICTIONARY:
 			seed = str(metadata.get("seed", "n/a"))
-		_log("Replay metadata: seed=%s" % seed, "info")
+			profile = str(metadata.get("profile", "n/a"))
+			weather = str(metadata.get("weather_preset", "n/a"))
+		_log("Replay metadata: seed=%s profile=%s weather=%s" % [seed, profile, weather], "info")
 	_log("Replay mode enabled (%d samples)" % int(load_result.get("count", 0)), "success")
 	_track_event("replay_enabled", {"count": int(load_result.get("count", 0))})
 
@@ -861,7 +931,7 @@ func _validate_latest_telemetry():
 
 func _build_telemetry_session_metadata() -> Dictionary:
 	return {
-		"seed": 1337,
+		"seed": _environment_seed,
 		"low_hardware_mode": _low_hardware_mode,
 		"swarm_enabled": _swarm_enabled,
 		"swarm_behavior": _swarm_behavior,
@@ -870,7 +940,8 @@ func _build_telemetry_session_metadata() -> Dictionary:
 		"control_mode": _flight_control_mode,
 		"safety_enabled": _safety_enabled,
 		"sample_rate_hz": _telemetry_sample_rate,
-		"profile": "low_hardware" if _low_hardware_mode else "balanced",
+		"profile": _physics_profile,
+		"weather_preset": _weather_preset,
 	}
 
 func _toggle_safety_layer():
@@ -991,7 +1062,7 @@ func _update_swarm_and_telemetry(delta: float):
 	var leader_vel = (components_group.global_position - _prev_leader_pos) / max(delta, 0.0001)
 	var accel = (leader_vel - _prev_leader_vel) / max(delta, 0.0001)
 	if _sensor_model != null:
-		_sensor_state = _sensor_model.sample(sim_time, components_group.global_position, leader_vel, accel, _env_state.get("emi", Vector3.ZERO))
+		_sensor_state = _sensor_model.sample(sim_time, components_group.global_position, leader_vel, accel, _env_state.get("emi_channels", _env_state.get("emi", Vector3.ZERO)))
 	if _swarm_enabled and _swarm_controller != null:
 		_swarm_controller.update_followers(
 			delta,
@@ -2244,11 +2315,8 @@ func _handle_runtime_shortcuts(event: InputEventKey, sim_locked: bool):
 				_cycle_swarm_behavior()
 			"toggle_swarm":
 				_toggle_swarm()
-			"toggle_low_hardware":
-				_low_hardware_mode = not _low_hardware_mode
-				if _environment_service != null:
-					_environment_service.configure({"low_hardware_mode": _low_hardware_mode})
-				_log("Low hardware mode: " + ("ON" if _low_hardware_mode else "OFF"), "info")
+			"cycle_physics_profile":
+				_cycle_physics_profile()
 			"toggle_safety":
 				_toggle_safety_layer()
 			"toggle_mission":

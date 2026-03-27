@@ -30,7 +30,7 @@ Flyntic Studio is a Godot-based drone assembly and simulation demo. It provides 
 - `F5`: Toggle safety layer (geofence + failsafe RTL/land).
 - `F6`: Toggle telemetry recording session.
 - `F7`: Toggle swarm follower drones.
-- `F8`: Toggle low-hardware mode.
+- `F8`: Cycle physics profile (`low_hardware` -> `balanced` -> `high_fidelity`).
 - `F9`: Guided remediation for common wiring issues.
 - `F10`: Toggle autonomous mission planner.
 - `F12`: Toggle deterministic replay mode from latest telemetry CSV.
@@ -48,6 +48,16 @@ Flyntic Studio is a Godot-based drone assembly and simulation demo. It provides 
 
 ## Requirements
 - Godot 4.x
+
+## Phase A Acceptance
+- Run one-command acceptance for Phase A metrics:
+   ```powershell
+   ./scripts/run_phase_a_acceptance.ps1
+   ```
+- Optional: pass explicit Godot executable path:
+   ```powershell
+   ./scripts/run_phase_a_acceptance.ps1 -GodotCmd "C:/Tools/Godot_v4.3-stable_win64.exe"
+   ```
 
 ## License
 MIT License

@@ -21,7 +21,7 @@ func update_runtime(payload: Dictionary) -> Dictionary:
 	var accel = (leader_vel - prev_vel) / max(delta, 0.0001)
 
 	if sensor_model != null:
-		sensor_state = sensor_model.sample(sim_time, leader_pos, leader_vel, accel, env_state.get("emi", Vector3.ZERO))
+		sensor_state = sensor_model.sample(sim_time, leader_pos, leader_vel, accel, env_state.get("emi_channels", env_state.get("emi", Vector3.ZERO)))
 
 	if swarm_enabled and swarm_controller != null:
 		swarm_controller.update_followers(
