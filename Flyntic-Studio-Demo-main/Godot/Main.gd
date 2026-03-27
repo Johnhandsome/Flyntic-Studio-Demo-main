@@ -688,7 +688,15 @@ func _cycle_physics_profile():
 	_physics_profile = profiles[idx]
 	_weather_preset = _default_weather_for_profile(_physics_profile)
 	_apply_phase_a_runtime_config(true)
-	_show_toast("Physics profile: %s" % _physics_profile.capitalize().replace("_", " "), "info")
+	var desc = ""
+	match _physics_profile:
+		PHYSICS_PROFILE_LOW_HARDWARE: desc = "Giảm tải phần cứng, mô phỏng cơ bản."
+		PHYSICS_PROFILE_BALANCED: desc = "Cân bằng tốc độ và độ chân thực."
+		PHYSICS_PROFILE_HIGH_FIDELITY: desc = "Giả lập siêu thực, chi tiết vật lý gió/va chạm."
+		_: desc = ""
+		
+	_log("Physics profile: " + _physics_profile + " - " + desc, "info")
+	_show_toast("Physics profile: %s\n%s" % [_physics_profile.capitalize().replace("_", " "), desc], "info")
 	_track_event("physics_profile_changed", {
 		"profile": _physics_profile,
 		"weather": _weather_preset,
@@ -818,8 +826,15 @@ func _cycle_swarm_behavior():
 		var idx = modes.find(_swarm_behavior)
 		idx = (idx + 1) % modes.size()
 		_swarm_behavior = modes[idx]
-	_log("Swarm behavior: " + _swarm_behavior, "info")
-	_show_toast("Swarm behavior: %s" % _swarm_behavior.capitalize().replace("_", " "), "info")
+	var desc = ""
+	match _swarm_behavior:
+		SWARM_BEHAVIOR_LEADER_FOLLOWER: desc = "Các drone tự động bay theo sau Leader."
+		SWARM_BEHAVIOR_AREA_SWEEP: desc = "Dàn hàng ngang cùng nhau để quét khu vực."
+		SWARM_BEHAVIOR_RELAY_CHAIN: desc = "Nối đuôi nhau tạo thành chuỗi trạm tiếp sóng."
+		_: desc = ""
+	
+	_log("Swarm behavior: " + _swarm_behavior + " - " + desc, "info")
+	_show_toast("Swarm mode: %s\n%s" % [_swarm_behavior.capitalize().replace("_", " "), desc], "info")
 	_track_event("swarm_behavior_changed", {"behavior": _swarm_behavior})
 
 func _cycle_flight_control_mode():
@@ -830,8 +845,15 @@ func _cycle_flight_control_mode():
 		var idx = modes.find(_flight_control_mode)
 		idx = (idx + 1) % modes.size()
 		_flight_control_mode = modes[idx]
-	_log("Flight control mode: " + _flight_control_mode, "info")
-	_show_toast("Flight mode: %s" % _flight_control_mode.capitalize().replace("_", " "), "info")
+	var desc = ""
+	match _flight_control_mode:
+		CTRL_MODE_MANUAL_ASSIST: desc = "Bay thủ công với hệ thống hỗ trợ cân bằng."
+		CTRL_MODE_AUTO_MISSION: desc = "Bay hoàn toàn tự động theo lộ trình (Mission)."
+		CTRL_MODE_ADAPTIVE_HOVER: desc = "Tự động giữ vị trí và thích ứng với gió dông."
+		_: desc = ""
+		
+	_log("Flight control mode: " + _flight_control_mode + " - " + desc, "info")
+	_show_toast("Flight mode: %s\n%s" % [_flight_control_mode.capitalize().replace("_", " "), desc], "info")
 	_track_event("flight_control_mode_changed", {"mode": _flight_control_mode})
 
 func _toggle_telemetry_recording():
@@ -841,7 +863,7 @@ func _toggle_telemetry_recording():
 	if _telemetry_recorder.is_active():
 		_telemetry_recorder.stop_session()
 		_log("Telemetry recording stopped", "info")
-		_show_toast("Telemetry recording stopped", "info")
+		_show_toast("Telemetry recording stopped\nĐã dừng ghi dữ liệu chuyến bay.", "info")
 		_track_event("telemetry_stopped")
 		return
 	var start_result = _telemetry_recorder.start_session("drone", _build_telemetry_session_metadata())
@@ -849,7 +871,7 @@ func _toggle_telemetry_recording():
 		_last_telemetry_csv = str(start_result.get("csv", ""))
 		_last_telemetry_manifest = str(start_result.get("manifest", ""))
 		_log("Telemetry recording started", "success")
-		_show_toast("Telemetry recording started", "success")
+		_show_toast("Telemetry recording started\nBắt đầu ghi dữ liệu chuyến bay (tọa độ, vận tốc...).", "success")
 		_track_event("telemetry_started", {"session": str(start_result.get("session_id", ""))})
 	else:
 		_log("Telemetry recording failed to start", "error")
@@ -863,14 +885,14 @@ func _toggle_autonomous_mission():
 		_mission_planner.stop()
 		_mission_active = false
 		_log("Autonomous mission disabled", "info")
-		_show_toast("Autonomous mission disabled", "info")
+		_show_toast("Auto Mission disabled\nĐã hủy chế độ bay tự động.", "info")
 		_track_event("mission_disabled")
 		return
 	_mission_planner.load_default_mission(components_group.global_position)
 	_mission_planner.start()
 	_mission_active = true
 	_log("Autonomous mission enabled (%d waypoints)" % _mission_planner.waypoint_count(), "success")
-	_show_toast("Autonomous mission enabled", "success")
+	_show_toast("Auto Mission enabled\nBắt đầu bay tự động theo %d điểm (waypoints)." % _mission_planner.waypoint_count(), "success")
 	_track_event("mission_enabled", {"waypoints": _mission_planner.waypoint_count()})
 
 func _toggle_replay_mode():
@@ -881,7 +903,7 @@ func _toggle_replay_mode():
 		_replay_runner.stop()
 		_replay_active = false
 		_log("Replay mode disabled", "info")
-		_show_toast("Replay mode disabled", "info")
+		_show_toast("Replay mode disabled\nĐã tắt chế độ phát lại dữ liệu bay.", "info")
 		_track_event("replay_disabled")
 		return
 	if _last_telemetry_csv == "":
@@ -911,7 +933,7 @@ func _toggle_replay_mode():
 			weather = str(metadata.get("weather_preset", "n/a"))
 		_log("Replay metadata: seed=%s profile=%s weather=%s" % [seed, profile, weather], "info")
 	_log("Replay mode enabled (%d samples)" % int(load_result.get("count", 0)), "success")
-	_show_toast("Replay mode enabled", "success")
+	_show_toast("Replay mode enabled\nĐang phát lại dữ liệu với %d mẫu." % int(load_result.get("count", 0)), "success")
 	_track_event("replay_enabled", {"count": int(load_result.get("count", 0))})
 
 func _validate_latest_telemetry():
@@ -929,7 +951,7 @@ func _validate_latest_telemetry():
 		return
 	var score = float(result.get("quality_score", 0.0))
 	_log("Telemetry quality score: %.1f" % score, "info")
-	_show_toast("Telemetry quality score: %.1f" % score, "info")
+	_show_toast("Data Quality (F4): %.1f / 100\nĐã kiểm tra dữ liệu Telemetry." % score, "info")
 	_log(
 		"Rows=%d, parse=%d, monotonic=%d, outliers=%d" % [
 			int(result.get("rows", 0)),
@@ -973,8 +995,9 @@ func _toggle_safety_layer():
 			"reason": "disabled",
 			"target": components_group.global_position,
 		}
-	_log("Safety layer: " + ("ON" if _safety_enabled else "OFF"), "info")
-	_show_toast("Safety layer: " + ("ON" if _safety_enabled else "OFF"), "info")
+	var desc = "BẬT: Giới hạn tốc độ/tránh va chạm để bảo vệ thiết bị." if _safety_enabled else "TẮT: Cho phép điều khiển bay tự do không giới hạn."
+	_log("Safety layer: " + ("ON" if _safety_enabled else "OFF") + " - " + desc, "info")
+	_show_toast("Safety layer: %s\n%s" % ["ON" if _safety_enabled else "OFF", desc], "info")
 	_track_event("safety_toggled", {"enabled": _safety_enabled})
 
 func _setup_topbar_menu_actions():
@@ -3969,18 +3992,25 @@ func _show_toast(msg: String, type: String = "info"):
 	
 	var lbl = Label.new()
 	lbl.text = msg
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lbl.add_theme_font_size_override("font_size", 13)
 	toast.add_child(lbl)
 	
 	add_child(toast)
+	# Force an update so it sizes correctly based on contents to be able to center it
+	toast.reset_size()
 	var vp_size = get_viewport_rect().size
+	var target_y = vp_size.y - 80
 	toast.custom_minimum_size = Vector2(300, 40)
-	toast.position = Vector2(vp_size.x / 2 - 150, vp_size.y - 80)
-	toast.modulate.a = 0.0
 	
+	# Wait one frame or defer centering to get accurate size
+	var center_x = vp_size.x / 2 - (toast.get_minimum_size().x / 2)
+	toast.position = Vector2(center_x, target_y)
+	toast.modulate.a = 0.0
+
 	var tw = create_tween()
 	tw.tween_property(toast, "modulate:a", 1.0, 0.2)
-	tw.tween_property(toast, "position:y", toast.position.y - 30, 0.2).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tw.tween_property(toast, "position:y", target_y - 30, 0.2).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	tw.tween_interval(2.5)
 	tw.tween_property(toast, "modulate:a", 0.0, 0.5)
 	tw.tween_callback(toast.queue_free)
