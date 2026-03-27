@@ -36,6 +36,10 @@ func update_runtime(payload: Dictionary) -> Dictionary:
 	telemetry_timer += delta
 	if telemetry_recorder != null and telemetry_recorder.is_active() and telemetry_timer >= (1.0 / max(telemetry_rate, 1.0)):
 		telemetry_timer = 0.0
+		var swarm_state = []
+		if swarm_enabled and swarm_controller != null:
+			swarm_state = swarm_controller.get_followers_state()
+			
 		telemetry_recorder.record({
 			"ts": Time.get_unix_time_from_system(),
 			"sim_time": sim_time,
@@ -47,6 +51,7 @@ func update_runtime(payload: Dictionary) -> Dictionary:
 			"emi": env_state.get("emi", Vector3.ZERO),
 			"luminance": float(env_state.get("luminance", 1.0)),
 			"swarm_count": swarm_controller.follower_count() if swarm_controller != null else 0,
+			"swarm_state": swarm_state,
 			"safety": safety_state,
 		})
 

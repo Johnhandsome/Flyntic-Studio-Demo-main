@@ -59,5 +59,35 @@ Flyntic Studio is a Godot-based drone assembly and simulation demo. It provides 
    ./scripts/run_phase_a_acceptance.ps1 -GodotCmd "C:/Tools/Godot_v4.3-stable_win64.exe"
    ```
 
+## Phase B Acceptance
+- Run one-command acceptance for Phase B metrics (Autonomy completion >= 90%, Failsafe triggering correctly):
+   ```powershell
+   ./scripts/run_phase_b_acceptance.ps1
+   ```
+- Optional: pass explicit Godot executable path:
+   ```powershell
+   ./scripts/run_phase_b_acceptance.ps1 -GodotCmd "C:/Tools/Godot_v4.3-stable_win64.exe"
+   ```
+
+## Phase C Acceptance
+- Run one-command acceptance for Phase C metrics (Swarm Formation, Collision Separation, 8-12 Multi-agent telemetry):
+   ```powershell
+   ./scripts/run_phase_c_acceptance.ps1
+   ```
+- Optional: pass explicit Godot executable path:
+   ```powershell
+   ./scripts/run_phase_c_acceptance.ps1 -GodotCmd "C:/Tools/Godot_v4.3-stable_win64.exe"
+   ```
+
+## Phase D Acceptance
+- Run one-command acceptance for Phase D metrics (Data bundling to ZIP and quality validation):
+   ```powershell
+   ./scripts/run_phase_d_acceptance.ps1
+   ```
+- Optional: pass explicit Godot executable path:
+   ```powershell
+   ./scripts/run_phase_d_acceptance.ps1 -GodotCmd "C:/Tools/Godot_v4.3-stable_win64.exe"
+   ```
+
 ## License
 MIT License

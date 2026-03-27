@@ -10,7 +10,13 @@ $requiredFiles = @(
     "docs/release/RC_ROLLBACK_PLAYBOOK.md",
     "Godot/tests/run_tests.gd",
     "Godot/tests/phase_a_acceptance.gd",
-    "scripts/run_phase_a_acceptance.ps1"
+    "scripts/run_phase_a_acceptance.ps1",
+    "Godot/tests/phase_b_acceptance.gd",
+    "scripts/run_phase_b_acceptance.ps1",
+    "Godot/tests/phase_c_acceptance.gd",
+    "scripts/run_phase_c_acceptance.ps1",
+    "Godot/tests/phase_d_acceptance.gd",
+    "scripts/run_phase_d_acceptance.ps1"
 )
 
 foreach ($f in $requiredFiles) {

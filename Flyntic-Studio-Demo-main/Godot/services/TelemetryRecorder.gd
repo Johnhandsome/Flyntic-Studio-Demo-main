@@ -84,3 +84,15 @@ func _write_manifest(metadata: Dictionary):
 	}
 	mf.store_string(JSON.stringify(doc, "\t"))
 	mf.close()
+
+func get_session_id() -> String:
+	return _session_id
+
+func get_dir() -> String:
+	return _dir
+
+func get_jsonl_path() -> String:
+	return _jsonl_path
+
+func flush():
+	pass

@@ -2,13 +2,20 @@
 
 This backlog is ordered by business impact and release risk.
 
-## Immediate Next Sprint (Roadmap Phase A Closure)
+## Immediate Next Sprint (Roadmap Phase C & D Closure)
 
 - [x] Add wind model v2 with altitude-layer turbulence profile in `Godot/services/EnvironmentPhysicsService.gd`.
 - [x] Add EMI model v2 with sensor-specific channels (GPS drift, magnetometer bias, gyro jitter) exposed by environment/sensor services.
 - [x] Add deterministic weather/lighting presets with explicit seed control.
 - [x] Add physics profile presets (`low_hardware`, `balanced`, `high_fidelity`) and wire profile selection through runtime configuration + telemetry manifest.
-- [x] Add benchmark scenario and acceptance script for Phase A metrics (60 FPS low_hardware, no telemetry schema violations, near-identical seeded replay).
+- [x] Add benchmark scenario and acceptance script for Phase A metrics.
+- [x] Add benchmark scenario and acceptance script for Phase B metrics.
+- [x] Add Swarm Formation Manager (Line, V, Circle, Custom offsets) to `SwarmController`.
+- [x] Add Collision avoidance envelope and separation tuning (Boids separation) constraint.
+- [x] Add Multi-agent telemetry labeling (record state per drone ID in swarm).
+- [x] Add benchmark scenario and acceptance script for Phase C metrics (8-12 drones low_hardware stable, collision threshold pass).
+- [x] Add end-to-end Dataset export bundler (ZIPPacker) for Telemetry JSONL + CSV + Manifest.
+- [x] Add benchmark scenario and acceptance script for Phase D metrics (Dataset generation and validator reproducibility).
 
 ## P0 - Must complete before charging broadly
 
