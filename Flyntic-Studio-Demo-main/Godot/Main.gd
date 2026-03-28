@@ -2470,7 +2470,7 @@ func _process(_delta):
 	
 		if is_instance_valid(ghost):
 			_move_ghost()
-		elif sim_state == "playing" and _dragging_swarm_idx != -1:
+		elif _dragging_swarm_idx != -1:
 			_move_swarm_drone()
 
 	if sim_state == "playing":
@@ -2549,18 +2549,37 @@ func _move_swarm_drone():
 	var states = _swarm_controller.get_followers_state()
 	var current_pos = states[_dragging_swarm_idx].pos
 
-	var plane = Plane(Vector3.UP, current_pos.y)
-	var hit = plane.intersects_ray(ro, rd)
+	var hit = null
+	if Input.is_key_pressed(KEY_SHIFT):
+		var cam_fwd = camera.global_transform.basis.z
+		var normal = cam_fwd
+		normal.y = 0
+		if normal.length() > 0.001:
+			normal = normal.normalized()
+		else:
+			normal = Vector3.FORWARD
+		var plane = Plane(normal, normal.dot(current_pos))
+		var pt = plane.intersects_ray(ro, rd)
+		if pt != null:
+			hit = Vector3(current_pos.x, pt.y, current_pos.z)
+	else:
+		var plane = Plane(Vector3.UP, current_pos.y)
+		hit = plane.intersects_ray(ro, rd)
+
 	if hit != null:
 		var leader_pos = components_group.global_position
 		var offset = hit - leader_pos
 		_swarm_controller.set_custom_offset(_dragging_swarm_idx, offset)
-		if _swarm_behavior != SwarmController.FORMATION_CUSTOM:
+		var f_data = _swarm_controller._followers[_dragging_swarm_idx]
+		var f_node = f_data.get("node")
+		if is_instance_valid(f_node):
+			f_node.global_position = hit
+		if _swarm_behavior != "formation_custom":
 			var states_all = _swarm_controller.get_followers_state()
 			for i in range(states_all.size()):
 				if i != _dragging_swarm_idx:
 					_swarm_controller.set_custom_offset(i, states_all[i].pos - leader_pos)
-			_swarm_behavior = SwarmController.FORMATION_CUSTOM
+			_swarm_behavior = "formation_custom"
 			_log("Swarm mode changed to Custom Formation", "info")
 
 func _find_snap() -> Variant:
@@ -2710,33 +2729,39 @@ func _pick_existing():
 	var best_uid := -1
 	var best_d := 1000.0
 	
-	if sim_state == "playing":
-		# Only pick swarm drones during simulation
-		var best_swarm_idx := -1
-		if _swarm_controller != null and _swarm_controller.is_active():
-			var states = _swarm_controller.get_followers_state()
-			for i in range(states.size()):
-				var pos = states[i].pos
-				var to_node = pos - ro
-				var projection = to_node.dot(rd)
-				if projection > 0:
-					var closest_point = ro + rd * projection
-					var dist = closest_point.distance_to(pos)
-					if dist < 1.5 and dist < best_d:
-						best_d = dist
-						best_swarm_idx = i
-		if best_swarm_idx != -1:
-			_selected_swarm_idx = best_swarm_idx
-			_dragging_swarm_idx = best_swarm_idx
-			_update_properties("swarm_%d" % best_swarm_idx)
-			_log("Selected swarm drone #%d" % best_swarm_idx, "info")
+	var best_swarm_idx := -1
+	if _swarm_controller != null and _swarm_controller.is_active():
+		var states = _swarm_controller.get_followers_state()
+		for i in range(states.size()):
+			var pos = states[i].pos
+			var to_node = pos - ro
+			var projection = to_node.dot(rd)
+			if projection > 0:
+				var closest_point = ro + rd * projection
+				var dist = closest_point.distance_to(pos)
+				if dist < 2.5 and dist < best_d:
+					best_d = dist
+					best_swarm_idx = i
+	if best_swarm_idx != -1:
+		_selected_swarm_idx = best_swarm_idx
+		_dragging_swarm_idx = best_swarm_idx
+		_update_properties("swarm_%d" % best_swarm_idx)
+		_log("Selected swarm drone #%d" % best_swarm_idx, "info")
 		return
 
+	for c in placed:
+		if not is_instance_valid(c.node): continue
+		if c.type == "Frame": continue # Don't pick frame
+		# check if ray passes near the node
+		var to_node = c.node.global_position - ro
+		var projection = to_node.dot(rd)
+		if projection > 0:
+			var closest_point = ro + rd * projection
 			var dist = closest_point.distance_to(c.node.global_position)
 			if dist < 1.0 and dist < best_d:
 				best_d = dist
 				best_uid = c.uid
-	
+
 	if best_uid != -1:
 		# Find the entry
 		for i in range(placed.size()):
@@ -5157,6 +5182,7 @@ func _update_properties(uid):
 
 	if _selected_swarm_idx != -1:
 		if _swarm_controller != null and _swarm_controller.follower_count() > _selected_swarm_idx:
+			_swarm_controller.set_highlight(_selected_swarm_idx)
 			var states = _swarm_controller.get_followers_state()
 			var p = states[_selected_swarm_idx].pos
 			props_name_lbl.text = "  Swarm Drone #%d" % _selected_swarm_idx
@@ -5165,6 +5191,8 @@ func _update_properties(uid):
 			props_thrust_lbl.text = "  Spawns: %d" % _swarm_controller.follower_count()
 			props_pos_lbl.text = "  Pos: (%.1f, %.1f, %.1f)" % [p.x, p.y, p.z]
 		return
+	elif _swarm_controller != null:
+		_swarm_controller.set_highlight(-1)
 
 	for c in placed:
 		if c.uid == _selected_uid:

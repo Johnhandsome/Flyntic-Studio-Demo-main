@@ -52,6 +52,20 @@ func spawn_followers(count: int, leader_position: Vector3):
 		n.global_position = leader_position + Vector3(cos(angle), 0.4 + float(i % 3) * 0.25, sin(angle)) * _formation_radius
 		_followers.append({"id": "swarm_%d" % i, "node": n, "vel": Vector3.ZERO, "custom_offset": Vector3.ZERO})
 
+func set_highlight(idx: int):
+	for i in range(_followers.size()):
+		var n = _followers[i].get("node")
+		if is_instance_valid(n) and n.get_child_count() > 0:
+			var body = n.get_child(0)
+			if body is MeshInstance3D and body.material_override != null:
+				var mat = body.material_override
+				if i == idx:
+					mat.emission = Color(0.9, 0.8, 0.2)
+					mat.albedo_color = Color(0.9, 0.8, 0.2, 0.95)
+				else:
+					mat.emission = Color(0.1, 0.6, 0.8)
+					mat.albedo_color = Color(0.2, 0.9, 0.9, 0.85)
+
 func clear_followers():
 	for f in _followers:
 		var n = f.get("node")
