@@ -358,9 +358,13 @@ var props_type_lbl: Label = null
 var props_weight_lbl: Label = null
 var props_thrust_lbl: Label = null
 var props_pos_lbl: Label = null
+var props_pos_x: SpinBox = null
+var props_pos_y: SpinBox = null
+var props_pos_z: SpinBox = null
 var _selected_uid := -1
 var _selected_swarm_idx := -1
 var _dragging_swarm_idx := -1
+var _dragging_frame_uid := -1
 
 # Onboarding UI refs/state
 var _onboarding_seen := false
@@ -2297,6 +2301,7 @@ func _input(event):
 			orbiting = false
 			panning = false
 			_dragging_swarm_idx = -1
+			_dragging_frame_uid = -1
 		elif mouse_action == "orbit_only":
 			orbiting = bool(mouse_rt.get("orbiting", false))
 			panning = false
@@ -2322,7 +2327,7 @@ func _input(event):
 					_cancel_ghost()
 		elif mouse_action == "pick_or_orbit":
 			_pick_existing()
-			if not ghost and _dragging_swarm_idx == -1:
+			if not ghost and _dragging_swarm_idx == -1 and _dragging_frame_uid == -1:
 				orbiting = true
 		elif mouse_action == "set_pan":
 			panning = bool(mouse_rt.get("panning", false))
@@ -2472,6 +2477,8 @@ func _process(_delta):
 			_move_ghost()
 		elif _dragging_swarm_idx != -1:
 			_move_swarm_drone()
+		elif _dragging_frame_uid != -1:
+			_move_frame()
 
 	if sim_state == "playing":
 		_simulate(_delta)
@@ -2574,6 +2581,7 @@ func _move_swarm_drone():
 		var f_node = f_data.get("node")
 		if is_instance_valid(f_node):
 			f_node.global_position = hit
+			_update_properties("swarm_%d" % _dragging_swarm_idx)
 		if _swarm_behavior != "formation_custom":
 			var states_all = _swarm_controller.get_followers_state()
 			for i in range(states_all.size()):
@@ -2581,6 +2589,46 @@ func _move_swarm_drone():
 					_swarm_controller.set_custom_offset(i, states_all[i].pos - leader_pos)
 			_swarm_behavior = "formation_custom"
 			_log("Swarm mode changed to Custom Formation", "info")
+
+func _move_frame():
+	if _dragging_frame_uid == -1: return
+
+	var frame_node = null
+	for c in placed:
+		if c.uid == _dragging_frame_uid:
+			frame_node = c.node
+			break
+
+	if not is_instance_valid(frame_node):
+		return
+
+	var mpos = viewport.get_mouse_position()
+	var ro = camera.project_ray_origin(mpos)
+	var rd = camera.project_ray_normal(mpos)
+	
+	var current_pos = frame_node.global_position
+
+	var hit = null
+	if Input.is_key_pressed(KEY_SHIFT):
+		var cam_fwd = camera.global_transform.basis.z
+		var normal = cam_fwd
+		normal.y = 0
+		if normal.length() > 0.001:
+			normal = normal.normalized()
+		else:
+			normal = Vector3.FORWARD
+		var plane = Plane(normal, normal.dot(current_pos))
+		var pt = plane.intersects_ray(ro, rd)
+		if pt != null:
+			hit = Vector3(current_pos.x, pt.y, current_pos.z)
+	else:
+		var plane = Plane(Vector3.UP, current_pos.y)
+		hit = plane.intersects_ray(ro, rd)
+
+	if hit != null:
+		frame_node.global_position = hit
+		_rebuild_wires()
+		_update_properties(_dragging_frame_uid)
 
 func _find_snap() -> Variant:
 	var mpos = viewport.get_mouse_position()
@@ -2751,7 +2799,7 @@ func _pick_existing():
 
 	for c in placed:
 		if not is_instance_valid(c.node): continue
-		if c.type == "Frame": continue # Don't pick frame
+		# Allow picking frame for continuous drag
 		# check if ray passes near the node
 		var to_node = c.node.global_position - ro
 		var projection = to_node.dot(rd)
@@ -2768,6 +2816,12 @@ func _pick_existing():
 			if placed[i].uid == best_uid:
 				var c = placed[i]
 				cur_id = c.id
+				if c.type == "Frame":
+					_selected_uid = c.uid
+					_dragging_frame_uid = c.uid
+					_update_properties(c.uid)
+					_log("Selected Frame", "info")
+					return
 				_moving_component_uid = c.uid
 				_moving_component_snapshot = {
 					"id": c.id,
@@ -5163,10 +5217,42 @@ func _setup_properties_panel():
 	vb.add_child(props_thrust_lbl)
 	
 	props_pos_lbl = Label.new()
-	props_pos_lbl.text = "  Position: —"
+	props_pos_lbl.text = "  Position:"
 	props_pos_lbl.add_theme_font_size_override("font_size", 10)
 	props_pos_lbl.add_theme_color_override("font_color", Color(0.6, 0.7, 0.8))
 	vb.add_child(props_pos_lbl)
+
+	var pos_grid = VBoxContainer.new()
+	pos_grid.add_theme_constant_override("separation", 2)
+
+	props_pos_x = SpinBox.new()
+	props_pos_x.min_value = -1000.0
+	props_pos_x.max_value = 1000.0
+	props_pos_x.step = 0.1
+	props_pos_x.prefix = "X:"
+	props_pos_x.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	props_pos_x.value_changed.connect(_on_pos_input_changed.bind(0))
+	pos_grid.add_child(props_pos_x)
+
+	props_pos_y = SpinBox.new()
+	props_pos_y.min_value = -1000.0
+	props_pos_y.max_value = 1000.0
+	props_pos_y.step = 0.1
+	props_pos_y.prefix = "Y:"
+	props_pos_y.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	props_pos_y.value_changed.connect(_on_pos_input_changed.bind(1))
+	pos_grid.add_child(props_pos_y)
+
+	props_pos_z = SpinBox.new()
+	props_pos_z.min_value = -1000.0
+	props_pos_z.max_value = 1000.0
+	props_pos_z.step = 0.1
+	props_pos_z.prefix = "Z:"
+	props_pos_z.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	props_pos_z.value_changed.connect(_on_pos_input_changed.bind(2))
+	pos_grid.add_child(props_pos_z)
+
+	vb.add_child(pos_grid)
 
 func _update_properties(uid):
 	_selected_uid = -1
@@ -5189,7 +5275,9 @@ func _update_properties(uid):
 			props_type_lbl.text = "  Type: Follower"
 			props_weight_lbl.text = "  Mode: " + _swarm_behavior
 			props_thrust_lbl.text = "  Spawns: %d" % _swarm_controller.follower_count()
-			props_pos_lbl.text = "  Pos: (%.1f, %.1f, %.1f)" % [p.x, p.y, p.z]
+			props_pos_x.set_value_no_signal(p.x)
+			props_pos_y.set_value_no_signal(p.y)
+			props_pos_z.set_value_no_signal(p.z)
 		return
 	elif _swarm_controller != null:
 		_swarm_controller.set_highlight(-1)
@@ -5203,8 +5291,51 @@ func _update_properties(uid):
 			props_thrust_lbl.text = "  Thrust: %dg" % cdata.thrust
 			if is_instance_valid(c.node):
 				var p = c.node.global_position
-				props_pos_lbl.text = "  Pos: (%.1f, %.1f, %.1f)" % [p.x, p.y, p.z]
+				props_pos_x.set_value_no_signal(p.x)
+				props_pos_y.set_value_no_signal(p.y)
+				props_pos_z.set_value_no_signal(p.z)
 			return
+
+func _on_pos_input_changed(val: float, axis: int):
+	var is_playing = false
+	if typeof(sim_state) == TYPE_STRING and sim_state == "playing":
+		is_playing = true
+	
+	if _selected_swarm_idx != -1:
+		if _swarm_controller == null or not _swarm_controller.is_active() or _selected_swarm_idx >= _swarm_controller.follower_count():
+			return
+		var f_data = _swarm_controller._followers[_selected_swarm_idx]
+		var f_node = f_data.get("node")
+		if is_instance_valid(f_node):
+			if axis == 0:
+				f_node.global_position.x = val
+			elif axis == 1:
+				f_node.global_position.y = val
+			elif axis == 2:
+				f_node.global_position.z = val
+			
+			var leader_pos = components_group.global_position
+			var offset = f_node.global_position - leader_pos
+			_swarm_controller.set_custom_offset(_selected_swarm_idx, offset)
+			
+			if _swarm_behavior != "formation_custom":
+				var states_all = _swarm_controller.get_followers_state()
+				for i in range(states_all.size()):
+					if i != _selected_swarm_idx:
+						_swarm_controller.set_custom_offset(i, states_all[i].pos - leader_pos)
+				_swarm_behavior = "formation_custom"
+				_log("Swarm mode changed to Custom Formation via manual position input", "info")
+	
+	elif _selected_uid != -1:
+		for c in placed:
+			if c.uid == _selected_uid and is_instance_valid(c.node):
+				if axis == 0:
+					c.node.global_position.x = val
+				elif axis == 1:
+					c.node.global_position.y = val
+				elif axis == 2:
+					c.node.global_position.z = val
+				break
 
 # ──────────────────────────── WIRING → PREFLIGHT ──────────────────
 func _get_comp_type_by_uid(uid_str: String) -> String:
